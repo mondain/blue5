@@ -59,4 +59,38 @@ Start	Stop	length	Semnification	Zone name
 
 == Comments ==
 
+A: I always put it 0
 
+B: Impersonate with 3.5.1.1 (4 bytes: 3,5,1,1)
+
+C: the bytes in this zone gives the offset to the digest with the formula:
+uint32_t offset = b[0] + b[1] + b[2] + b[3];
+offset = offset % 728;
+ offset = offset + 12;
+
+E: HMACsha256 over first 1536 bytes except zone E (the digest itself) using fisrt 36 bytes from genuineFMSKey as key
+
+I: the server's public key from the DH key pair
+
+L: The location of the server's public key computed with this formula:
+uint32_t offset = b[0] + b[1] + b[2] + b[3];
+offset = offset % 632;
+offset = offset + 772;
+
+Of course, DH key must be computed before computing zone E
+
+N: 2 stage sha256 hash
+chalange=hmacsha256 over zone E from client chunk 1 using entire genuineFMSKey as key
+final hash=hmacsha256 over zone M using chalange as key
+
+= Client Chunk 2 =
+
+Start	Stop	length	Semnification	Zone name
+0	1503	1504	Unknown zone	A
+1504	1535	32	2 stage Hash	B
+
+== Comments ==
+
+Start	Stop	length	Semnification	Zone name
+0	1503	1504	Unknown zone	A
+1504	1535	32	2 stage Hash	B
