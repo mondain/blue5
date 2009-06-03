@@ -1,0 +1,938 @@
+
+
+MFP - The Secure Media Flow Protocol - version 1
+0.8  3 May 04 Matthew Kaufman
+0.9  8 Oct 04 Michael Thornburgh
+1.0 24 Nov 04 Michael Thornburgh
+1.1 25 Jul 05 Michael Thornburgh
+1.2 14 Dec 05 Michael Thornburgh
+
+documentation Copyright 2004, 2005 amicima, Inc.
+
+Network Layer - Encapsulation
+
+    This protocol may be carried within IP datagrams directly, with a
+    suitable IP header, or encapsulated within a UDP datagram. The latter
+    is recommended for NAT and firewall traversal reasons. The choice of
+    UDP port number is not mandated by the protocol, but may be mandated
+    by a higher protocol layer or the application.
+
+Network Layer - Multiplex
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                      Scrambled Session ID                     |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      \                                                               \
+      /                        Encrypted Packet                       /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Scrambled Session ID - The Session ID that the receiver has requested
+            be used by the sender when sending packets to this receiver,
+            modified by performing a bitwise exclusive-or with the bitwise
+            exclusive-or of the first two 4-octet words of the Encrypted
+            Packet.  That is, for Scrambled Session ID "SSID", Session
+            ID "SID", and Encrypted Packet "EP",
+
+                 SSID[0] = SID[0] XOR EP[0] XOR EP[4]
+                 SSID[1] = SID[1] XOR EP[1] XOR EP[5]
+                 SSID[2] = SID[2] XOR EP[2] XOR EP[6]
+                 SSID[3] = SID[3] XOR EP[3] XOR EP[7]
+
+            where [N] denotes the Nth (0-based) octet of the indicated
+            field.
+
+            Note: the Session ID (prior to Scrambling) MUST be
+            0x00000000 when using the Default Session Key (see "Encryption"
+            below).
+
+            The Scrambled Session ID may be used to demultiplex incoming packets
+            without regard to the originating IP address or incoming interface.
+            Mobility capability depends on this decoupling.
+
+
+Network Layer - Encryption
+
+    Encryption is performed as the final step after packet assembly.
+    Therefore, no fields described below may be used at the receiver
+    until decryption takes place. The encryption key used is the session
+    key, which starts as a fixed key value (application-dependent Default
+    Session Key) and is then changed to a randomly-chosen session key
+    during startup negotiation.
+
+    Note that because block encryption is used at all times, any errors
+    in transmission are 'scrambled' throughout the decrypted block, which
+    improves the ability to detect errors.
+
+    Encryption should be performed packet at a time in CBC (or equivalent)
+    mode. Each packet gets the same IV, so there is no inter-packet
+    dependency, but within a packet, the maximum possible security is
+    attained.
+
+    The choice of encryption algorithm and Default Session Key are not
+    mandated by the protocol. An example of a suitable encryption algorithm
+    is 128-bit AES. The chunk specification allows for padding after the
+    final chunk, so fixed-block-size ciphers may be used.
+
+
+Network Layer - Packet
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |           Checksum            |       Session Flags           |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |           Timestamp           |       Timestamp Echo          |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      \                                                               \
+      /                        Chunks                                 /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Checksum - Internet checksum of the packet. Checksum is computed
+            with the checksum field set to zero, and is the 16 bit one's
+            complement of the one's complement sum of all 16 bit words in
+            the packet, padding the packet with an extra zero byte if
+            necessary to complete the calculation. This is the last step
+            prior to encryption.
+
+            Upon reception, if the Checksum is incorrect, it is likely that
+            none of the packet can be properly decoded due to the spreading
+            effects of the encryption, so the packet must be discarded.
+
+      Session Flags -
+
+          +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+          | | | | | | |E|S| | | | |I|R|t|T|
+          +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+          'E' 0x0200 'Timestamp Echo Valid' -
+              Indicates the disposition of the Timestamp Echo field.
+              When set, the Timestamp Echo field contains the sender's
+              estimate of the receiver's 4ms clock at the time
+              this packet was transmitted.  When clear, the Timestamp
+              Echo field MAY contain noise and MUST be ignored.
+
+          'S' 0x0100 'Startup' - 
+              Indicates that startup handshaking is in progress.
+              When set, only startup chunks are allowed, when clear
+              no startup chunks are allowed. Additionally, none of the
+              low byte flags may be set if this is set.
+
+          'I' 0x0008 'Initiator Mark'
+	      SHOULD be set by a sender if it is the original Initiator of
+	      this MFP Session, and MUST NOT be set otherwise. The
+	      Initiator of the session SHOULD discard any packet received
+	      with this flag set in order to reject echoed packets.
+
+          'R' 0x0004 'Responder Mark'
+	      SHOULD be set by a sender if it is the original Responder of
+	      this MFP Session, and MUST NOT be set otherwise. The
+	      Responder of the session SHOULD discard any packet received
+	      with this flag set in order to reject echoed packets.
+
+          't' 0x0002 'Time Critical Reverse Notification'
+	      Indicates that the sender is currently (see the realtime
+	      dispatching description for what 'currently' means) receiving
+	      packets which have the 'T' bit set on OTHER sessions. (In
+	      other words, if we set the 'T' bit, the far end sets its
+	      't' bit on communications with everyone BUT us, unless it
+	      is getting packets with the 'T' bit set from someone else
+	      right now)
+
+          'T' 0x0001 'Time Critical Forward Notification'
+	      Indicates that this packet contains a data chunk which was
+	      dispatched with realtime priority.
+
+          All other flags are reserved at this time and MUST be set to zero.
+
+      Timestamp -
+	    The low 16 bits of the sender's 4 msec clock at the time at
+	    which this packet was transmitted.  The sender's clock MAY
+	    have its origin at any time in the past.
+    
+      Timestamp Echo -
+	    When valid, as indicated by the "Timestamp Echo Valid" header
+	    flag, the sender's *estimate* of what the Timestamp field
+	    of a packet received from the receiver would be at the time
+	    this packet was transmitted. The estimate SHOULD be computed
+	    by recording the last Timestamp received from the receiver
+	    and the time at which that Timestamp was received, and then
+	    adding the number of elapsed 4ms periods between time of
+	    reception of that Timestamp and transmission of this packet.
+	    The sender SHOULD attempt this estimate when less than 8
+	    seconds have elapsed since reception of a Timestamp.
+
+	    A receiver MAY assume the instantaneous Round Trip Time
+	    (RTT), when the Timestamp Echo Valid flag is set, to be the
+	    difference between the Timestamp Echo and the low 16 bits
+	    of the 4 msec clock at the time this packet was received.
+
+
+Network Layer - Chunks
+
+    In all cases where a "Flow Source Port Number" is mentioned, that is the
+    number of the port associated with the flow at the end SENDING the chunk.
+
+    In all cases where a "Flow Destination Port Number" is mentioned, this is
+    the number of the port associated with the flow at the end RECEIVING the
+    chunk.
+
+    So, for example, if you receive a chunk with a SOURCE of 1 and a DESTINATION
+    of 2, and you need to report an exception, you set the SOURCE to 2 and the
+    DESTINATION of 1 in the exception report.
+
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      | Chunk Type    | Chunk Flags   |      Chunk Data Length        |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |    Chunk Data ...                                             |
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Chunk Type - Specifies the type of chunk this is. See the detailed
+            description of each chunk for allowed values.
+
+      Chunk Flags - 
+
+            +-+-+-+-+-+-+-+-+
+            |L|             |
+            +-+-+-+-+-+-+-+-+
+
+            'L' 0x80  Last Chunk
+                 Indicates that this is the last chunk in the packet.
+                 Any data remaining in the packet beyond the end of this
+                 chunk is considered to be padding and MUST be ignored.
+
+            Remaining chunk flags are defined by the specific chunk type.
+            Flags not defined for a specific chunk type SHOULD be considered
+            "reserved", SHOULD be set to zero by a sender, and MUST be
+            ignored by a receiver.
+
+      Chunk Data Length - Length of the FOLLOWING chunk data. 16 bit unsigned
+            value.
+
+      Chunk Data - Variable length data. See the detailed description of each
+            chunk for usage.
+
+
+Chunk Type: 0x00 Null / Salt
+
+   For the Null chunk case:
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x00      | Chunk Flags   |      0x0000                   |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      The Null chunk can be sent when traffic must be sent, but there is
+      no traffic waiting to send (eg., to keep a firewall or NAT device
+      mapping active)
+
+   For the Salt chunk case:
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x00      | Chunk Flags   |            Salt Length        |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |    Salt Data                                                  |
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      The Salt chunk may be sent as the first chunk in a packet in order
+      to increase the entropy present in the first encrypted block. This
+      increases the complexity of plaintext-based attacks. The Salt Data
+      must be filled with strongly random data. The Salt chunk should
+      not be included when there is enough data pending to fill the MTU
+      unless the security to performance tradeoff has been fully analyzed.
+    
+      Also note that sending random data as padding, while complicating
+      attacks based on searching for known plaintext, also opens the door
+      to side-channel attacks, where the "random" data is actually a
+      covert communication channel that is exposing other internal state
+      to a listener, or providing strongly known text for use in attacks
+      on the encryption by a third party. The security tradeoffs must
+      be considered.
+
+Chunk Type: 0x01 Ping
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x01      | Chunk Flags   |       Optional Data Length    |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |    Optional Data                                              |
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Chunk Flags:
+
+            +-+-+-+-+-+-+-+-+
+            |L| Optional Msg|
+            +-+-+-+-+-+-+-+-+
+
+            'L' 0x80  Last Chunk (see Chunk description)
+
+            'Optional Msg' 0x7f  Optional Message
+
+      The Ping chunk may be sent in order to elicit a Ping Reply from
+      the other end. The Optional Data and Optional Message will be
+      returned in the Ping Reply.  It is recommended that the size of
+      the Optional Data be kept to a minimum. The length of the Optional
+      Data may be zero, in which case no Optional Data follows.
+
+
+Chunk Type: 0x81 Ping Reply
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x81      | Chunk Flags   |       Optional Data Length    |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |    Optional Data                                              |
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Chunk Flags:
+
+            +-+-+-+-+-+-+-+-+
+            |L| Optional Msg|
+            +-+-+-+-+-+-+-+-+
+
+            'L' 0x80  Last Chunk (see Chunk description)
+
+            'Optional Msg' 0x7f  Optional Message
+
+      The Ping Reply chunk MUST be sent in response to a Ping chunk and
+      the Optional Message, Optional Data Length, and Optional Data MUST
+      be copied from the Ping message.
+
+Chunk Type: 0x02 User Data
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x02      | Chunk Flags   |   Chunk Length                |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |    Flow Source Port Number    |  Flow Destination Port Number |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                    Flow Sequence Number                       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                  Forward Sequence Number                      |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      \   User Data                                                   \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      The User Data chunk is the basic unit of information transmission.
+
+      Each User Data chunk contains data for a single flow. A flow
+      is identified by the combination {Src Port, Dst Port}
+
+      Chunk Flags - 
+
+            +-+-+-+-+-+-+-+-+
+            |L|R|F|S| | | |N|
+            +-+-+-+-+-+-+-+-+
+
+            'L' 0x80  Last Chunk (see Chunk description)
+
+            'R' 0x40  Retransmission
+                 Indicates that this is a duplicate of a previously-sent chunk
+
+            'F' 0x20  Final
+                 Indicates that this chunk is the last to be transmitted in
+                 this flow.
+
+            'S' 0x10  Start
+                 Indicates that this chunk is the first to be transmitted in
+                 this flow.
+
+            'N' 0x01  No Data
+                 Indicates that this chunk's sequence number is invalid and
+                 that there is no user data.  This is called a
+                 Forward Sequence Number (FSN) Update.
+
+      The Chunk Length is the total length of the chunk, including the
+      length of the User Data and the size of the User Data Header (12
+      bytes).
+
+      The Flow Source Port Number and Flow Destination Port Number
+      uniquely identify a flow within the Session.
+
+      The Flow Sequence Number is 32-bit quantity which is initialized
+      to a random number at the initiation of each flow. Each new User
+      Data chunk receives the next (N+1) Sequence Number, wrapping at
+      0xffffffff to 0x00000000.  Comparisons of Sequence Numbers must
+      be done appropriately to account for the potential of wraparound.
+      Retransmitted chunks receive the same sequence number as the first
+      transmission.  When the "No Data" flag is set, a sender SHOULD set
+      this field to 0 and a receiver MUST ignore this field.
+
+      The Forward Sequence Number is a 32-bit quantity which indicates
+      to the receiver that all User Data Chunks in this flow with Sequence
+      Numbers less than or equal to this are considered by the sender
+      to be acknowledged by the receiver.  No Data Acknowledgement should
+      be sent reporting loss of a chunk with a Sequence Number less than
+      or equal to this number, and when reordering received chunks for
+      delivery to the application (if the application has requested
+      ordered delivery of user data) it must be assumed that no
+      retransmission of a chunk with a Sequence Number less than or equal
+      to this number will be received in the future and therefore a
+      missing gap must be passed to the application.
+
+      Note that in the case of completely reliable transmission, the
+      sender will never set the Forward Sequence Number any higher than
+      the highest contiguously acknowledged Sequence Number as reported
+      in a User Data Acknowledgement chunk.
+
+      The sender MUST initialize the Forward Sequence Number to the
+      initial Flow Sequence Number minus one.
+
+      User Data is filled with application data.
+
+      A sender MUST use full reliability when sending a chunk with either
+      or both of the 'S' and 'F' flags set.
+
+      A "Forward Sequence Number Update" ("FSN Update") is sent by
+      transmitting a User Data chunk with the "No Data" flag set.  The
+      Flow Sequence Number is invalid in that case, and any User Data
+      in the chunk MUST be ignored.
+
+
+Chunk Type: 0x12 Buffer Probe
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x12      | Chunk Flags   |   Chunk Length                |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |   Flow Source Port Number     |  Flow Destination Port Number |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      A sender may send a Buffer Probe in order to determine the current
+      available receive buffer for a flow.
+
+      A sender SHOULD send a Buffer Probe for a flow for which data can
+      no longer be sent (because the next User Data chunk is larger than
+      the Advertised Buffer for the flow) every time the Persist Timer
+      expires.  This protects against the possible loss of a Data
+      Acknowledgement sent when the available buffer reached its high
+      limit, and also allows transmission to resume sooner in the case
+      of very large buffers which, while relatively empty, still have
+      not reached the high limit.
+
+      The Persist Timer is started when data can no longer be sent, and
+      expires at 1 second, triggering a probe. Subsequent probes, if
+      necessary, are sent at doubled intervals (2 seconds, 4 seconds,
+      etc.) but in no case any less often than every 60 seconds.
+
+Chunk Type: 0x82 Data Acknowledgement(s)
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x82      | Chunk Flags   | Chunk Length                  |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |   Acknowledgement List...                                      
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      An Acknowledgement List is the concatenation of one or more of the
+      following:
+
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |  Flow Source Port Number      |  Flow Destination Port Number |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                    Advertised Buffer Available                |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                    Cumulative Acknowledgement                 |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |# of Ack Ranges|
+      +-+-+-+-+-+-+-+-+
+
+      Advertised Buffer Available is a count of the number of bytes of
+      User Data that the receiver is currently prepared to accept for
+      this flow. Note: If a receiver's available buffer is ever exhausted
+      below its low limit, a Data Acknowledgement MUST be sent for every
+      additional User Data chunk that is received. Once that happens, a
+      Data Acknowledgement MUST also be sent when the receiver's available
+      buffer then crosses a corresponding high limit if no other Data
+      Acknowledgements have been sent in the meantime. A Data Acknowledgement
+      MUST also be sent for every Buffer Probe which is received.
+
+      Cumulative Acknowledgement is an acknowledgement of every Flow
+      Sequence Number in this flow that is less than or equal to this
+      value.  The Cumulative Acknowledgement MUST NOT be less than the
+      highest Forward Sequence Number received.  The Cumulative
+      Acknowledgement SHOULD be the largest Flow Sequence Number in the
+      range contiguously received after the Forward Sequence Number.
+
+      If the # of Ack Ranges is 0, nothing follows
+
+      If the # of Ack Ranges is 1 or greater, a series of range
+      acknowledgements follows. In no case will a range acknowledgement
+      be sent which has a range start less than the Cumulative Acknowledgement
+      (and therefore, if no such ranges exist, none may be sent).
+
+      The contents of a range acknowledgement is:
+
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |        First Flow Sequence Number Received Successfully       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |         Last Flow Sequence Number Received Successfully       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      The range acknowledgements MUST be sent in ascending order. The
+      range acknowledgements MUST NOT overlap. Two range acknowldgements
+      which are adjacent SHOULD be consolidated into a single range
+      acknowledgement.
+
+      Note that unlike the TCP SACK option, the receiver must not renege
+      on claims made about successful receipt of data, even if holes are
+      present.
+
+      Ranges continue to be acknowledged every time an acknowledgement
+      is sent for a flow until such time as the Forward Sequence Number
+      makes them unnecessary.
+
+
+Chunk Type: 0x8e Flow Exception Report
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x8e      | Chunk Flags   | Chunk Length                  |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |  Flow Source Port Number      |  Flow Destination Port Number |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      \  Optional Parameters                                          \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Chunk Flags - 
+
+            +-+-+-+-+-+-+-+-+
+            |L|  Exception  |
+            +-+-+-+-+-+-+-+-+
+
+            'L' 0x80  Last Chunk (see Chunk description)
+
+            'Exception' is the Exception Number being reported:
+
+                0x03 port unreachable
+                0x0d port administratively blocked
+
+     Upon receipt, discard any unacked chunks waiting to be sent to this
+     flow pair, and consider the flow to be closed.  An indication of
+     flow exception SHOULD be sent to the application.
+
+
+
+Chunk Type: 0xcc Session Close
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0xcc      | Chunk Flags   |      0x0000                   |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Chunk Flags:
+
+            +-+-+-+-+-+-+-+-+
+            |L|0|0|0|  Msg  |
+            +-+-+-+-+-+-+-+-+
+
+            'L' 0x80  Last Chunk (see Chunk description)
+            Msg:
+                  1- Close Request
+                  2- Close Request Acknowledge
+
+
+Chunk Type: 0x20 Session Sequence Number
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x20      | Chunk Flags   |  Chunk Length                 |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                                                               |
+      +                  Session Sequence Number                      +
+      |                                                               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Session Sequence Number is a monotonically increasing 64-bit counter
+      in network byte order. A Sender SHOULD place a Session Sequence
+      Number chunk before any other chunks in a packet that may have
+      undesired effects if a duplicate is received (example: a User Data
+      chunk with the Start flag set). A Sender MUST increase the counter
+      each time a Session Sequence Number chunk is sent, and SHOULD
+      increase it by 1 each time. A Receiver MUST NOT process any chunks
+      in a packet that follow a Session Sequence Number chunk containing
+      a sequence number previously received. A Sender SHOULD choose the
+      first sequence number randomly.
+
+
+
+Chunk Type: 0x70 Initiator Hello (Startup Chunk)
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x70      | Chunk Flags   | Tag Data Length               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      \   Tag Data                                                    \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      This chunk is sent by the Initiator of a new session to begin the
+      startup handshake.
+
+      Chunk Flags:
+
+            +-+-+-+-+-+-+-+-+
+            |L|0|0|0|Version|
+            +-+-+-+-+-+-+-+-+
+
+            'L' 0x80  Last Chunk (see Chunk description)
+
+            'Version'  4 bit field which defines the highest startup handshake 
+                       version supported by the initiator.
+
+               0x01 - Version 1, the version described by this document.
+
+      Tag Data Length is the length of the FOLLOWING Tag Data. Note that
+      this value MUST NOT exceed 255, since the responder will only echo
+      up to 255 bytes of tag data. If Tag Data Length exceeds 255, the
+      responder MUST NOT send a Responder Hello in response. (This limits
+      the size of Responder Hello messages, which reduces the impact of
+      using the Responder as a reflector in a denial-of-service attack)
+
+      Tag Data is implementation defined data which may be used to
+      discriminate among Responder Hello replies which come in response
+      to Initiator Hellos.
+
+
+Chunk Type: 0xf0 Responder Hello and Credentials (Startup Chunk)
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0xf0      | Chunk Flags   | Data Length                   |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      | Tag Length    |  Tag Data Echo                                |
+      +---------------+                                               +
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      | Cookie Length |  Cookie Data                                  |
+      +---------------+                                               +
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      | Responder Certificate Length  |   Responder Certificate       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      This chunk is sent by the Responder of a new session in response
+      to an Initiator Hello message. This message can and should be sent
+      without creating any persistant data at the Responder end. (This
+      protects against "SYN flood" style attacks using Initiator Hello
+      messages from forged source addresses)
+
+      Chunk Flags:
+
+            +-+-+-+-+-+-+-+-+
+            |L|0|0|0|Version|
+            +-+-+-+-+-+-+-+-+
+
+            'L' 0x80  Last Chunk (see Chunk description)
+
+            'Version'  4 bit field which is the minimum of the highest startup
+                       handshake version supported by the responder or the
+                       version sent in the Initiator Hello message.
+
+               0x01 - Version 1, the version described by this document
+
+            (once the Version has been agreed upon by each end, extensions
+             defined by that version number are valid)
+
+      Data Length is the total length of the following data. Note that
+      each element has a length, so any future addition of elements is
+      simplified.
+
+      Tag Length is the length of the FOLLOWING Tag Data Echo.
+
+      Tag Data Echo is the Tag Data sent in the Initiator Hello message,
+      unchanged.
+
+      Cookie Length is the length of the FOLLOWING Cookie Data.
+
+      Cookie Data is created by the Responder in order to recognize the
+      next startup message (Initiator Initial Keying). This data should
+      be unique to a particular Initiator address and time period, and
+      not be predictable by any entity other than the Responder. It
+      should also be relatively cheap to compute and verify (in CPU
+      cycles) (if it takes many CPU cycles to compute, an attacker can
+      generate Initiator Hello messages in order to create a denial of
+      service attack against the Responder's CPU). For instance, a
+      moderately strong hash of the Initiator IP address, the current
+      time value, and a secret key known only to the Responder would
+      fulfill these requirements.
+
+      Responder Certificate Length is the length of the FOLLOWING Responder
+      Certificate.
+
+      Responder Certificate is the actual Responder Certificate.
+
+      (The student of cryptography will note at this point that the
+      message could be signed by the Responder, which would validate
+      that the Responder is who he says he is. However, that requirement
+      is handled later, when the Responder must decrypt the session key
+      which is sent by the Initiator, encrypted with the Responder's
+      public key. Requiring the Responder to sign this message could lead
+      to the same denial of service issues noted in the description of
+      Cookie Data.)
+
+      Note: MFP Version 1 does not mandate a specific certificate format
+      or cryptographic services, types, or modes. The choice of certificate
+      format and the cryptographic services it provides are determined
+      by the application, in the same manner as the Default Session Key
+      and packet encryption algorithm. Examples of suitable certificate
+      formats include MFPCert, X.509, and PGP, using RSA keys suitable
+      for signing and encryption.
+
+
+Chunk Type: 0xfe reserved for Responder Redirect (Startup Chunk)
+
+
+Chunk Type: 0x72 Initiator Initial Keying (Startup Chunk)
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x72      | Chunk Flags   | Data Length                   |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                   Initiator Session ID                        |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      | Cookie Length | Cookie Echo                                   |
+      +---------------+                                               +
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      | Initiator Certificate Length  |   Initiator Certificate       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |        SKIC Length            |    Session Key Initiator      |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+         Component             +
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      | Signature Length              |   Signature                   |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Chunk Flags:
+
+            +-+-+-+-+-+-+-+-+
+            |L|0|0|0|Version|
+            +-+-+-+-+-+-+-+-+
+
+            'L' 0x80  Last Chunk (see Chunk description)
+
+            'Version'  4 bit field - must match the Responder Hello version at
+                       this point
+
+               0x01 - Version 1, the version described by this document
+
+      Data Length is the total length of the following data. Note that
+      each element has a length, so any future addition of elements is
+      simplified.
+
+      Initiator Session ID is the Session ID to be used by the Responder
+      when sending packets to the Initiator. This must be chosen to be
+      unique so that it may be used for demultiplexing incoming packets.
+      Note that it doesn't need to be strongly unique, because old packets
+      with the same Session ID will not decrypt properly.
+
+      Cookie Length is the length of the FOLLOWING Cookie Echo data.
+
+      Cookie Echo is the Cookie Data sent in the Responder Hello message,
+      unchanged. Upon receipt on this message, the Responder must check
+      the Cookie Echo. If it isn't valid (further defined in the startup
+      proceedure documentation), this message is treated as though it
+      had never arrived and no error condition is raised. Because no
+      persistant data was created by the Responder, there is no persistant
+      data to release.
+
+      Initiator Certificate Length is the length of the FOLLOWING Initiator
+      Certificate.
+
+      Initiator Certificate is the actual Initiator Certificate. See the
+      note above for Responder Hello and Credentials about certificates.
+
+      SKIC Length is the length of the FOLLOWING Session Key Initiator
+      Component.
+
+      Session Key Initiator Component is the Initiator's portion of the
+      Session Key, in a form that will only be useful to the Responder
+      (for example, encrypted to the Responder's public key, or a
+      Diffie-Hellman public key). The Session Key is formed from the
+      combination of the Initiator Component and the Responder Component
+      in a manner defined by the application. Examples of acceptable
+      manners: the bitwise exclusive-OR of the decrypted key material
+      from the Initiator and Responder; the computation of the Diffie-Hellman
+      shared secret from the secret and public keys.
+
+      Signature Length is the length of the FOLLOWING Signature.
+
+      Signature is the Initiator's digital signature of the entire data
+      portion of this chunk prior to the Signature Length (so, starting
+      with the Initiator Session ID, up to and including the final octet
+      of the Session Key Initiator Component data).
+
+      Upon receipt of this message (with a valid Cookie, see above), the
+      Responder must check the Initiator Certificate to see if it is
+      deemed to be valid (for example, having the endorsement of a trusted
+      entity).  If it is not, this message is treated as though it had
+      never been received.
+
+      Next, the Responder must verify the Signature with the Initiator
+      Certificate.  If it does not verify, this message is treated as
+      though it had never been received.
+
+      If we reach this point, then the Responder knows who the Initiator
+      claims to be, and thanks to the signature in this message, that
+      the Initiator is who he claims to be. The Initiator also knows who
+      the Responder claims to be, but won't know if the Responder IS who
+      he claims to be until the Responder sends the Responder Initial
+      Keying with a valid signature.
+
+
+Chunk Type: 0x7f reserved for Rekeying
+
+
+Chunk Type: 0xf2 Responder Initial Keying (Startup Chunk)
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0xf2      | Chunk Flags   |  Chunk Length                 |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                    Responder Session ID                       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |         SKRC Length           |    Session Key Responder      |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+         Component             +
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |      Signature Length         |         Signature             |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
+      \                                                               \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      Responder Session ID is the Session ID to be used by the Initiator
+      when sending packets to the Responder. This must be chosen to be
+      unique so that it may be used for demultiplexing incoming packets.
+
+      SKRC Length is the length of the FOLLOWING Session Key Responder
+      Component data.
+
+      Session Key Responder Component is the Responder's portion of the
+      Session Key, in a form that will only be useful to the Initiator
+      (for example, encrypted to the Initiator's public key, or a
+      Diffie-Hellman public key). The Session Key is formed from the
+      combination of the Initiator Component and the Responder Component
+      in a manner defined by the application. Examples of acceptable
+      manners: the bitwise exclusive-OR of the decrypted key material
+      from the Initiator and Responder; the computation of the Diffie-Hellman
+      shared secret from the secret and public keys.
+
+      Signature Length is the length of the FOLLOWING Signature.
+
+      Signature is the Responder's digital signature of the concatenation
+      of the entire data portion of this chunk prior to the Signature
+      Length (so, starting with the Responder Session ID, up to and
+      including the last octet of the Session Key Responder Component
+      data), and the Session Key Initiator Component data, as received
+      in the Initiator Initial Keying message.
+
+      The Responder MUST send this packet to the Initiator using the
+      Initiator Session ID, as specified in Initiator Initial Keying,
+      and using the Default Session Key as defined by the application.
+
+      After sending this chunk using the Default Session Key, responder
+      MUST use the newly computed Session Key for any other communication
+      with the Initiator EXCEPT for a retransmission of this Responder
+      Initial Keying chunk, in response to duplicate Initiator Initial
+      Keying.
+
+      Upon receipt of this message, the Initiator checks the Signature.
+      If it does not verify, this message must be treated as though it
+      had never been received.  If the message is authentic, the Session
+      Key Responder Component is combined with the Initiator Session Key
+      Component in the manner determined by the application to form
+      the Session Key.
+
+
+
+Chunk Type: 0x03 Lightweight Message (LWM)
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     0x03      |  Chunk Flags  |        Chunk Length           |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |     LWM Source Port Number    |  LWM Destination Port Number  |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      \   User Data                                                   \
+      /                                                               /
+      \                                                               \
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      The Chunk Length includes the length of the User Data and the size
+      of the Lightweight Message header (4 octets).
+
+      Lightweight Messages (LWMs) are considered to be independent of sessions.
+      Therefore, LWMs SHOULD be sent using the Default Session Key
+      and Session ID 0, even if a session exists between sender and
+      receiver.  A sender SHOULD send only one LWM per packet.  A sender
+      SHOULD NOT send LWMs with more than 1024 octets of User Data.  A
+      receiver MAY accept LWMs encrypted with the session key of an
+      existing session with the sender.  A receiver SHOULD accept multiple
+      LWMs per packet.  A receiver MAY accept LWMs containing more than
+      1024 octets of User Data.
+
+

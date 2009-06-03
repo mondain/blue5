@@ -1,0 +1,619 @@
+
+MObj: A Lightweight Object Framework
+=====================================
+
+
+Introduction
+------------
+MObj is a lightweight framework for object-oriented programming in plain
+ANSI C. It provides reference counting, dynamic method dispatch, single
+inheritance, simple collections and enumerators, serialization, object
+wrappers for some fundamental types (int, float, string, data, socket
+addresses), notifications, and a straightforward object ownership and
+memory management policy.
+
+MObj is inspired by Smalltalk, Objective-C, CoreFoundation, and
+Cocoa/OpenStep.
+
+MObj's external dependencies (beyond the standard C library) are the
+standard C math library, POSIX Threads, and BSD Sockets interface including
+IPv6 (for socket addresses).
+
+Windows Note: you can obtain a free POSIX Threads implementation at
+
+   http://sources.redhat.com/pthreads-win32/
+
+
+Runtime
+-------
+Before any part of MObj is used, its runtime MUST be initialized by
+calling MObj_runtimeInit(). MObj_runtimeInit() may be called multiple
+times and from multiple threads; invocations after the first are ignored,
+and no call to the function will complete until the runtime is ready.
+Reference counting, autorelease pools, and messaging WILL NOT WORK if
+the runtime is not initialized.
+
+
+Objects and Types
+-----------------
+In MObj, the term "Type" is used where most object-oriented environments
+would use "Class". The root of the inheritance chain is MObjBaseType.
+All objects are instances of a Type. Types are themselves objects and
+are instances of type MObjTypeType. MObjTypeType is an instance of itself
+(that is, MObjTypeType is an object of type MObjTypeType). A type inherits
+structure and behavior from its supertype. MObjBaseType has no supertype.
+
+Note: MObj_alloc() returns an object with its type set to the requested
+type, its reference count set to 1, and all other fields set to a
+byte-value of 0.
+
+
+Memory Management and Ownership
+-------------------------------
+Objects are reference counted. A newly allocated object starts with a
+reference count of 1. A type may disable reference counting for its
+instances. This is typically used for static objects or objects located
+on the stack.
+
+MObj_retain() increases an object's reference count, and MObj_release()
+decreases it. When the reference count reaches 0, the object is deallocated.
+MObj_retain() and MObj_release() are thread-safe.
+
+An object that is obtained from a function or method with "alloc", "init",
+"new", "copy", or "retained" in its name, or that is retained with
+MObj_retain(), is said to be "owned" by the caller. An owner is responsible
+for releasing its ownership with MObj_release(). Objects obtained in any
+other fashion are not owned by the caller and must not be released.
+Objects may be MObj_retain()ed multiple times; each retain must be
+balanced at some point with a MObj_release(). If an object needs to
+maintain a long-term reference to another object, it should retain the
+other object. This can lead to a reference loop; care must be taken to
+avoid loops.
+
+A type may specify a deallocator function to be called when an instance's
+reference count reaches 0. A deallocator typically releases any references
+to other objects or resources that the instant object holds. Inherited
+deallocators (if any) are called automatically after the type's deallocator,
+working through the supertype chain toward the root. MObjBaseType's
+deallocator is responsible for freeing the storage for the object itself.
+
+Note: Objects with reference counting disabled are never formally
+deallocated, so any memory, objects, or other resources allocated by
+them should be released by other means. In general, non-counted objects
+should avoid allocating other resources.
+
+
+Autorelease Pools
+-----------------
+An Autorelease Pool is a mechanism for deferring MObj_release()es to a
+future time. Each call of MObj_autorelease() on an object will cause a
+MObj_release() to be called against that object when the pool is
+deallocated. Pools do not exist by default; they must be allocated and
+released manually. Pools may be nested; that is, a new pool can be
+allocated while another pool is in effect. Each thread has its own stack
+of pools. MObj_autorelease() queues a MObj_release() into the current
+thread's most recently allocated pool that has not yet been deallocated.
+Releasing a pool that is not the current one will cause all nested
+sub-pools to be deallocated, starting from the innermost one and working
+outward.
+
+MObjAutoreleasePool is an essential component of the Object Ownership
+Policy. In general, if it is reasonable to expect a new object has been
+created but the name of the function or method doesn't indicate it is
+owned by the caller, it should be assumed the object has been autoreleased,
+and a MObjAutoreleasePool must be in effect so the object's memory will
+not be leaked. Examples of objects that have probably been autoreleased
+are: descriptive strings obtained with MObj_description(), collection
+enumerators, sets of activated Waitables obtained from MObj_poll().
+
+Do not MObj_autorelease() a MObjAutoreleasePool object. Do not MObj_release()
+one from a different thread than the one in which it was created. Do not
+MObj_retain() one. The behavior of doing any of these is undefined.
+
+Example:
+
+   MObjAutoreleasePool_t *pool;
+   MyObj_t *my1;
+   MyObj_t *my2;
+
+   pool = MObjAutoreleasePool_new(); // refcount 1
+   my1 = MObj_autorelease(MyObj_new()); // refcount 1
+   my2 = MObj_autorelease(MyObj_new()); // refcount 1
+
+   // do non-retaining stuff with my1, my2...
+
+   MObj_retain(my2); // refcount 2
+
+   MObj_release(pool); // refcount 0, dealloc
+   // this causes:
+   //   MObj_release(my1); // refcount 0, dealloc
+   //   MObj_release(my2); // refcount 1, still exists
+
+
+Compile-time Method Binding and Naming
+--------------------------------------
+There are no true compile-time method bindings in MObj, as there are in
+C++. Instead, a function naming convention is used to convey the type-method
+binding, with the type first, an underscore, and the operation.  For
+example, a function that would be considered a method of a MObjString
+object would be called
+
+   MObjString_someOperation(MObjString_t *aString, someArguments...);
+
+and should be considered equivalent to the C++ notation of
+
+   aString->someOperation(someArguments...);
+
+
+Dynamic Method Dispatch
+-----------------------
+MObj Messaging provides a means to bind a method (concrete implementation
+of behavior) to a message based on the object's type; this mapping being
+made at runtime by the messaging system. Contrast with Compile-time
+binding, which is done manually by the programmer at compile time. A
+message is sent to a receiver. A message is composed of a selector (the
+name of the message) and arguments. Selectors are either C string literals
+or constant C strings, which are obtained from the runtime with
+MObjSEL_fromString() or MObjSEL_fromCString(). Selectors take their
+form from Smalltalk and Objective-C selectors, and documentation uses
+the Objective-C notation to describe a message and the types of its
+arguments. Arguments are passed to the method with a stdarg va_list.  A
+method is a function of type MObjIMP_f, and is conventionally named
+M_TypeName_selector. Colons in selectors should be mapped to underscores
+in the name of the implementation function. For example, MObjString
+objects implement a method for the "isEqual:" selector. The documentation
+for "isEqual:" specifies it is an instance method returning a MObjBoolean_t*,
+and taking as its argument any object. The documentation would look like
+
+  - (MObjBoolean_t *) isEqual: (void *)otherObject
+
+MObjString's method for this selector would look like
+
+  static void * _M_MObjString_isEqual_(void *self, MObjSEL_t selector, va_list argp)
+  {
+      void *otherObject = va_arg(argp, void *);
+      ...
+  }
+
+Its mapping in MObjStringType's method table would look like
+
+  { 0, "isEqual:", _M_MObjString_isEqual_ }
+
+Sending this message to a string looks like
+
+  rv = MObj_msgSend(aString, "isEqual:", otherObject);
+
+If "aString" is a MObjString instance, the _M_MObjString_isEqual_()
+function will be called. Note that the actual method called is determined
+at runtime according to the type of the receiver.
+
+Sending any message to the NULL pointer is a no-op and returns NULL.
+
+Methods are inherited through the type hierarchy, and any method may be
+overridden by a subtype.
+
+The search for the method for a message normally begins at the type of
+the receiver. However, the search can be started at other points in the
+inheritance chain by using MObj_msgSendSuper(). This mechanism is usually
+used in a method that overrides a method in a supertype, so that the
+supertype's method can be invoked and its results modified.
+
+Type objects are themselves objects and may receive messages:
+
+  aDescr = MObj_msgSend(&MObjStringType, "description");
+
+Type methods are indicated as such with a "+" in documentation, as with
+Objective-C.
+
+Inheritance for Type methods is slightly different than for instance
+methods. The search for a matching Type method starts at the type and
+works up the supertype chain toward the root. If no match is found at
+the root, a search for an instance method of the same name for MObjTypeType
+starts and works up the inheritance chain again from there (MObjTypeType's
+supertype is MObjBaseType).
+
+If a method can't be found for a message, a "forwardMessage" message
+will be sent to the object. The default implementation of "forwardMessage"
+prints an error message and returns NULL.
+
+Methods are bound to selectors in the Type object's "methods" field at
+compile-time, and may also be added at runtime with MObjType_addMethods().
+
+Note that the implementation of the messaging system, particularly the
+method dispatch tables and caches, is thread-safe. That is, MObj_msgSend(),
+MObj_msgSendSuper(), MObjType_addMethods(), etc., may be called
+simultaneously from multiple threads, and the messaging system's internal
+state will remain consistent. However, messages sent with MObj_msgSend()
+are not synchronized, so methods don't automatically inherit synchronization.
+
+
+Collections
+-----------
+MObj includes the following simple collection types:
+
+   MObjArray
+   MObjIndexSet/MObjSequenceSet
+   MObjList
+   MObjSet
+   MObjSortedCollection
+   MObjSparseArray (aka "integer key dictionary")
+   MObjDictionary x2
+
+Collections store other objects. Some collections can be configured to
+store non-object data as well. Unless configured otherwise, collections
+retain their members. All collections can enumerate the objects they
+contain.
+
+MObjArray maps contiguous integer indices (starting at zero) to objects.
+
+MObjIndexSet and MObjSequenceSet are ordered collections of 32-bit
+unsigned integers, using either regular unsigned integer semantics
+(MObjIndexSet), or RFC1982-style serial/sequence number semantics
+(MObjSequenceSet).
+
+MObjList is a ring of objects. The non-object head/tail of the ring is
+called the Sentinel.
+
+MObjSet is an unordered collection of objects, where each object may
+occur only once in the collection. Note: An object must not mutate such
+that the results of the "hash" or "isEqual:" methods change while the
+object is in a MObjSet.
+
+MObjSortedCollection is an ordered collection that keeps its members
+sorted according to an external ordering criteria. See "Ordering" below
+for more information. Note: An object should not mutate such that the
+behavior of the sorting criteria changes while the object is in a
+MObjSortedCollection. See MObjSortedCollection.h for more information.
+
+MObjSparseArray maps non-contiguous unsigned integer indices to objects.
+
+MObjDictionary is an unordered collection that maps a key object to a
+value object. There are two implementations of MObjDictionary (MObjHTDict
+and MObjSLDict) which each have tradeoffs for use in different environments.
+MObjSLDict (Skiplist Dictionary) is more space-efficient than MObjHTDict
+(hash tree), but MObjHTDict is considerably faster. Note: A key object
+must not mutate such that the results of the "hash" or "isEqual:" methods
+change while the object is a key in a MObjDictionary.
+
+
+Enumerators
+-----------
+A MObjEnumerator is an object that returns the members of a collection
+one at a time, upon calling MObjEnumerator_nextObject(). Ordered collections
+(MObjArray, MObjList, MObjSortedCollection, and MObjSparseArray) are
+enumerated in order. Unordered collections are enumerated in no particular
+order. All collections provide functions to create enumerators.  Mapping
+collections can also enumerate their keys.
+
+Enumerators are usually used with the "enumeration idiom":
+
+   ...
+   void *each;
+   MObjEnumerator_t *e = MObjXXX_objectEnumerator(aCollection);
+
+   while((each = MObjEnumerator_nextObject(e)))
+   {
+       // do something with "each"
+   }
+   ...
+
+Note: It isn't safe to modify a collection while enumerating its members.
+If you must modify a collection during an enumeration, make a copy of
+the collection and enumerate the copy, or, if the enumeration is of
+MObj objects, you can use MObjEnumerator_safeEnumerator().
+
+Note: A MObjEnumerator retains the collection it is enumerating. A "safe"
+enumerator (obtained with MObjEnumerator_safeEnumerator()) retains the
+enumerated objects, but not the collection.
+
+
+Serializer
+----------
+A MObjSerializer produces a byte sequence representing an object, that
+can be transmitted or stored, and later reconstituted into an equivalent
+object.
+
+Not all objects can be serialized and reconstituted. Instances of the
+following types can be serialized and reconstituted:
+
+   MObjBitVectorType
+   MObjStringType & MObjLocalStringType
+   MObjSockaddrType & MObjSockaddrAutoType
+   MObjDataType & MObjDataAutoType
+   MObjSerializerUnmatchedExtensionDataType
+   MObjFloatType & MObjLocalFloatType
+   MObjIntegerType & MObjLocalIntegerType
+   MObjInteger64Type & MObjLocalInteger64Type
+
+   MObjArrayType
+   MObjHTDictType
+   MObjSLDictType
+   MObjListType
+   MObjSetType
+   MObjSparseArrayType
+
+Also, MObjNull, MObjTrue, MObjFalse, and the NULL pointer can be serialized.
+
+Collections may only contain serializable objects to be serializable
+themselves. Note that, at this time, MObjSortedCollections and MObjIndexSets
+are not serializable.
+
+Instances of other types can be serialized if they implement the
+Serializable Protocol as specified in the documentation for MObjSerializer.
+Types beyond those listed above are "extension types" and must be specified
+when a MObjSerializer instance is created. On reconstituting an unknown
+extension type, MObjSerializer will produce a
+MObjSerializerUnmatchedExtensionData object, which will re-serialize to
+the same byte stream. This allows an intermediary to be a conduit for
+serialized objects without having to understand them.
+
+A MObjSerializer, once created, is immutable and can be used to serialize
+and reconstitute objects simultaneously in multiple threads.
+
+
+Singletons
+----------
+Concrete singleton types have exactly one instance each, and therefore
+an "object identical" test (C's "==" operator) may be used to test for
+equality. The singletons provided by MObj are
+
+    MObjTrue  -- the object embodiment of Boolean "True"
+    MObjFalse -- the object embodiment of Boolean "False"
+    MObjNull  -- the object embodiment of Null
+
+Singletons exist to be unique values that are also objects, that always
+exist and can be returned from functions or methods, placed in collections,
+and compared against the return values of functions or methods.
+
+
+Waitables, Ports, and Poll Sets
+-------------------------------
+The Waitable Protocol enables objects to signal socket-like conditions
+and for a caller to wait for those conditions in a manner similar to
+select() or poll(). MObjWaitable is a semi-abstract type that implements
+the housekeeping of the Waitable Protocol. To make a Waitable object,
+derive from MObjWaitable, override "isReadable", "isWritable", and
+"isException" as appropriate, and use MObj_signal(). MObj_poll() will
+poll and/or wait for these conditions on one or more Waitable objects.
+
+MObjPort is a thread-safe* concrete Waitable that implements a blocking
+queue of objects. MObjPorts can optionally enforce sequence number
+ordering and queue size limits for objects that have sequence numbers
+and lengths.
+
+* In general, a MObjPort may not have multiple writers writing simultaneously,
+nor multiple readers reading simultaneously. MObj_poll() can't poll for
+the same condition on the same object simultaneously in different threads.
+
+A MObjPollSet is a Waitable collection-like container (but it is not a
+true MObjCollection) that can offer better performance than ordinary
+MObjCollections when polling large numbers of Waitables. A MObjPollSet
+holds one or more Waitables and will activate for a condition (isReadable,
+isWritable, or isException) if any of its members activate for that
+condition. A MObjPollSet can only be polled for one kind of condition
+during its lifetime. To test a group of Waitables for isReadable and
+isWritable, create two MObjPollSets, one for isReadable and one for
+isWritable, put the Waitables into both, and pass them both to MObj_poll().
+A MObjPollSet can be queried for or enumerate its members that were
+activated as of its last MObj_poll().
+
+Note: Waitables placed into a MObjPollSet can't be MObj_poll()ed directly
+for the same condition the poll set tracks unless the last MObj_poll()
+of the poll set indicated the Waitable activated, or the Waitable is
+removed from the poll set. It is expected that objects tracked for a
+condition in a MObjPollSet will use the poll set as the sole indicator
+of the tracked condition.
+
+
+Timers and TimerLists
+---------------------
+Timers allow the scheduling of actions in the future. A MObjTimer
+ordinarily fires once at its due time, and may fire again at regular
+intervals thereafter. There are two concrete types of MObjTimers:
+MObjCBTimer, whose action is to call a callback function, and MObjMTimer,
+whose action is to send a message to an object.
+
+A MObjTimerList holds MObjTimers. It can be queried for the interval
+until the earliest due time of its MObjTimers, fire ones that are due,
+and handle rescheduling.
+
+
+Run Loops
+---------
+A MObjRunLoop provides a framework for making an event-driven program.
+A run loop contains event sources and dispatches handlers when events
+occur on those sources.
+
+Run loops handle two kinds of event sources: Waitable objects (such as
+MObjPorts), and MObjTimer objects. Waitables can activate for readable,
+writable, or exception conditions asynchronously. MObjTimers fire at
+prearranged times. A handler can be a callback function, a message-send
+to an object, or (in the case of timers), the timer's fire action.
+
+Other threads can synchronously or asynchronously request an action occur
+in the context of the run loop with MObjRunLoop_performSelector().
+
+Typically, an application will create a run loop, register one or more
+handlers for Waitable conditions and set one or more timers in it, and
+then run it for a predetermined time or forever.
+
+As a convenience, run loops provide a MObjAutoreleasePool for handlers
+as they are called to process events.
+
+A running MObjRunLoop repeatedly performs the following loop until its
+run interval (if set) expires, or it is told to stop:
+
+  1. Create a fresh MObjAutoreleasePool
+  2. Poll all registered Waitables for monitored conditions, and
+     dispatch any handlers for activated ones
+  3. Fire any MObjTimers that are due
+  4. Flush the MObjAutoreleasePool
+  5. Go to sleep until either the next MObjTimer is due to fire, or
+     a registered Waitable activates for a monitored condition
+  6. Repeat
+
+Note: MObjRunLoop uses MObjPollSet internally, so a Waitable registered
+in a MObjRunLoop for a condition is subject to the same constraint as
+described above for MObjPollSet. A Waitable must not be placed into more
+than one MObjRunLoop (or MObjPollSet) for the same condition.
+
+If a function or method is running in the context of a run loop,
+MObjRunLoop_current() will return the MObjRunLoop object.
+
+
+Ordering
+--------
+Some kinds of objects may have a natural linear order in relation to
+others of their kind. Objects that have a natural linear order should
+define a method for the "<" message. For example, kinds of MObjNumbers
+(like MObjInteger, MObjFloat, MObjInteger64) are ordered from most
+negative to most positive. Given two MObjNumbers, one may come before
+or after (or be the same as) the other on the number line. MObjTimers
+are ordered in time. MObjStrings are ordered lexicographically.
+
+Objects that may or may not have a natural linear ordering, or that may
+have many kinds of linear orderings, may have an external order selected
+or imposed on them by using an Orderer (an object conforming to the
+Ordering Protocol), that compares two objects and determines if one comes
+before the other. MObjOrderDescriptor and its derivatives provide concrete
+implementations of different kinds of Orderers. See MObjOrdering.h for
+more rigorous information about ordering, including the Ordering Invariant.
+
+MObjSortedCollection uses an Orderer to define the order in which to
+keep its members sorted.
+
+The members of a MObjArray can be arranged into sorted order on demand
+with MObjArray_sortUsingOrderer().
+
+
+Notifications
+-------------
+Notifications are a way for objects to broadcast events to interested
+observer objects without the broadcaster having to know about or track
+the observers. There may be any number of observers for an event. An
+event has a name, which is a string, and may be associated with a specific
+object (or NULL). Events may optionally have ancillary information. An
+event is encapsulated in a MObjNotification object. MObjNotifications
+are forwarded from senders to interested observers through a
+MObjNotificationCenter. Every process has a default notification center
+that is created automatically. You typically don't create your own; you
+may, for example, to hide events from undesired observation.
+
+An observer registers its interest with a notification center, and
+optionally specifies filtering criteria to limit which events are
+delivered. An observer may request events be filtered based on name,
+associated object, or both.
+
+Events are posted to a specific MObjNotificationCenter -- typically the
+default one. Events are distributed to observers synchronously, in the
+thread of the poster (which may be different from the thread in which
+the observer registered its interest).
+
+MObjNotificationCenters don't retain observers or observed objects. An
+observer will typically remove itself from the center in its deallocator.
+
+Multithreading caveat: operations on MObjNotificationCenters are thread-safe
+to the extent that adding and removing observers and posting notifications
+may be done simultaneously from different threads without corrupting the
+data structures of the center. However, the posting of notifications is
+not synchronized with adding or removing observers. That is, if an
+observer removes itself from a center while a notification is being
+delivered in a different thread, the observer MIGHT still receive the
+notification in the posting thread. Likewise, if an observer adds itself
+to a center while a notification is being delivered, it MIGHT NOT receive
+that notification.
+
+
+Multithreading Issues
+---------------------
+In general, unless specified otherwise, making changes to MObj objects
+(such as collections) is not thread-safe. If multiple threads make changes
+to mutable objects, they must be externally synchronized. Some notable
+exceptions (also specified above):
+
+   o reference counting with MObj_retain() and MObj_release() is synchronized,
+     and deallocators will be called only once for an object
+   o MObj_autorelease() is thread-safe; every thread maintains its own
+     stack of MObjAutoreleasePools
+   o MObjSerializers may be used from multiple threads simultaneously
+   o MObjPorts may be written to while simultaneously being read from
+   o MObjNotificationCenters may have observers added and removed and
+     notifications posted simultaneously, but see the caveat above
+
+
+Type Hierarchy
+--------------
+MObjBaseType
+   |    
+   +--- MObjTypeType
+   +--- MObjAutoreleasePoolType
+   |    
+   +--- MObjByIndexDelegatorType
+   +--- MObjByTypeDelegatorType
+   +--- MObjNotificationCenterType
+   +--- MObjNotificationType
+   +--- MObjPortMessageType
+   |       +--- MObjPerformHolderType
+   +--- MObjRunLoopType
+   +--- MObjSerializerType
+   +--- MObjTimerListType
+   +--- MObjTimerType
+   |       +--- MObjCBTimerType
+   |       +--- MObjMTimerType
+   +--- MObjWaitableType
+   |       +--- MObjPortType
+   |       +--- MObjRunLoopProxyItemType
+   |               +--- MObjRunLoopCallbackItemType
+   |               +--- MObjRunLoopMessageItemType
+   |               +--- MObjRunLoopProxyItemAutoType
+   |    
+   +--- MObjBitVectorType
+   +--- MObjDataType
+   |       +--- MObjDataAutoType
+   |       +--- MObjSerializerUnmatchedExtensionDataType
+   +--- MObjNumberType
+   |       +--- MObjFloatType
+   |       |       +--- MObjLocalFloatType
+   |       +--- MObjIntegerType
+   |       |       +--- MObjLocalIntegerType
+   |       +--- MObjInteger64Type
+   |               +--- MObjLocalInteger64Type
+   +--- MObjRangeType
+   |       +--- MObjSequenceRangeType
+   +--- MObjSingletonType
+   |       +--- MObjBooleanType
+   |       |       +--- MObjFalseType
+   |       |       +--- MObjTrueType
+   |       +--- MObjNullType
+   +--- MObjSockaddrType
+   |       +--- MObjSockaddrAutoType
+   +--- MObjStringType
+   |       +--- MObjLocalStringType
+   |     
+   +--- MObjCollectionType
+   |       +--- MObjArrayType
+   |       +--- MObjDictionaryType
+   |       |       +--- MObjHTDictType
+   |       |       +--- MObjSLDictType
+   |       +---MObjIndexSetType
+   |       |       +--- MObjSequenceSetType
+   |       +--- MObjQueueType
+   |       |       +--- MObjListType
+   |       |       +--- MObjSortedCollectionType
+   |       +--- MObjSetType
+   |       +--- MObjSparseArrayType
+   +--- MObjPollSetType
+   |    
+   +--- MObjEnumeratorType
+   |
+   +--- MObjOrderDescriptorType
+           +--- MObjLocalOrderDescriptorType
+           |
+           +--- MObjCompoundOrderDescriptorType
+           +--- MObjOrderFunctionDescriptorType
+           |       +--- MObjLocalOrderFunctionDescriptorType
+           +--- MObjOrderMethodDescriptorType
+           |       +--- MObjLocalOrderMethodDescriptorType
+           +--- MObjReversedOrderDescriptorType
+
+

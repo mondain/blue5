@@ -1,0 +1,535 @@
+
+MFPNet
+======
+Infrastructure and API Version 1.0 README
+
+
+Introduction
+------------
+MFPNet is a collection of protocols, policies, services, and APIs,
+providing a uniform naming scheme for endpoints (MFP Instances aka
+"machines"), services, and entities (including people), and a means for
+finding, authenticating, and connecting to them wherever they are in the
+Internet, even behind NAT and firewall devices.
+
+MFPNet services include: a Public Key Infrastructure (PKI) for establishing
+and authenticating names for machines, services, and entities; a Name
+Binding Service for mapping services and entities to machines, and
+locating machines in the Internet; an Introducer Service that relays MFP
+Initiator Hello messages to facilitate session initiation through NAT
+and firewall devices.
+
+The MFPNet API Version 1.0 comprises data structures and functions for
+establishing, binding, locating, and authenticating named entities, and
+creating MFP flows to a named machine regardless of its current location
+in the Internet.
+
+The MFPNet Library provided here includes an implementation of the MFPNet
+API 1.0 plus supporting utilities, including MFP Authenticated Channels
+(MFPAC).
+
+
+Runtime and Library Dependencies
+--------------------------------
+The MFPNet Library is built on MFP, MFPMsg, MFPMU, MFPCert, and MObj,
+so the initialization requirements of those components hold here. In
+particular, the first line of your program should be "MObj_runtimeInit()";
+see the MObj README for more information. You must link the MFPNet Library
+with the MFP Library and its dependencies.
+
+
+Identities
+----------
+An MFPNet Identity is an MFPCert certificate with a 21 byte Subject field
+formatted as an mfpnet_identity_t. The 8 bit idtype field identifies
+what kind of identity this is (e.g. a machine or a person). The 160 bit
+iddata field is the name part, and is often random data or the SHA-1 of
+a plain-text name (but see the constraint below for Machine Identities).
+The Issuer field of the MFPCert identifies the Domain of this Identity
+(see below). The combination of an mfpnet_identity_t at a domain is
+called an MFPNet Address.
+
+Identities must have a good and current endorsement of the domain of
+which they are a part. The owner of a domain chooses the policy for
+endorsing identities. MFPNet provides services for establishing an
+identity within a domain and obtaining or renewing a domain endorsement.
+The MFPNet Library software distribution includes a sample Identity
+Establishing Server (es_mfpnet) that implements the standard policy and
+endorses certificates. The standard policy is "first come first served";
+that is, an endorsement will be given to the first entity to request an
+endorsement for a particular identity, and denied to any other entity
+requesting an endorsement for the same identity. This policy means that
+any particular identity could be anyone, but a repeated encounter with
+the same identity implies the same, or at least a cooperating, entity.
+The Identity Establishing Protocol allows other policies to be implemented,
+including requiring a username and password.
+
+
+Domains and the MFPNet Public Key Infrastructure
+------------------------------------------------
+An Identity is composed of a type and name at a domain, plus other
+certificate components, such as a Public Key, validity date range, and
+a domain endorsement (issuer and signature). An MFPNet Domain is simply
+a Domain Name System (DNS) domain. MFPNet supports any number of domains,
+each potentially with its own endorsement policy.
+
+An MFPNet Domain must have a Domain Certificate (aka "Silver Certificate").
+This is an MFPCert certificate whose subject is the domain in question
+(in lowercase ASCII characters) and having a good and current endorsement
+of the Gold Certificate (the Root Authority). The Gold Certificate is
+the self-signed certificate provided by amicima, Inc., having Subject
+and Issuer fields "AMICIMA" and public key fingerprint
+
+   E4C5 24A1 E071 654C 9DA8  8826 B29C 2E42 21CA 7125
+
+A Domain Certificate is stored in the DNS at name "cert.mfpnet.<domain-name>",
+in the manner described in the document "MFPCert - MFP Simplified Digital
+Certificate", available on the amicima web site at
+
+   http://www.amicima.com/developers/documentation.html
+
+For example, for domain "example.com", the Domain Certificate would have
+Subject "example.com", Issuer "AMICIMA", a good and current signature of
+the Gold Certificate (obtained from the Root Authority in an appropriate
+manner), and be stored in the DNS as
+
+   cert.mfpnet.example.com.  IN CERT  URI 0 0 (base64-encoded DNS serialization of certificate)
+
+The Gold Certificate is known to all MFPNet applications. Domain
+Certificates may be pre-loaded into an application or located in the
+DNS. MFPNet will automatically use the DNS to fetch new or updated Domain
+Certificates if necessary when it needs to authenticate a certificate
+presented from a domain whose current Domain Certificate is not located
+on the internal keychain. The Gold Certificate, the endorsement of Domain
+Certificates by the Gold Certificate and of Identities by Domain
+Certificates, Identity Establishing Servers, and the well-known location
+of Domain Certificates in the DNS comprises the inter-domain Public Key
+Infrastructure of MFPNet.
+
+The MFPNet software distribution includes the "mfpnetcerttool" command-line
+tool for generating and establishing MFPNet Identity certificates. You
+must use "mfpcerttool", included with the MFP distribution, to create a
+Domain Certificate and to endorse MFPNET_IDTYPE_REGSERVER and
+MFPNET_IDTYPE_NAMESERVER service identities for your domain, and to make
+the initial endorsement of the Machine ID of your first Establishing
+Server. See the amicima web site for information on how to obtain the
+signature of the Gold Certificate for your domain certificate.
+
+
+Structure
+---------
+A Machine Identity identifies an MFP endpoint. The Machine may have one
+or more IP address and UDP port pairs associated with it (for example,
+the address/port the endpoint believes it has, the address/port on the
+public side of a NAT, an address/port the machine was recently at, and
+address/port pairs of one or more Introducer Servers). Although a Machine
+may have many address/port pairs associated with it and at which it can
+be reached, it is expected that only one active MFP Instance is associated
+with a specific Machine Identity at any one time.
+
+Other kinds of MFPNet Identities (such as a Person, Entity, or Name
+Binding Server) are located at Machines. The same Identity may be located
+at more than one Machine simultaneously.
+
+The Name Binding Service records these associations and reports them in
+response to queries.
+
+A Machine performs an "implicit registration" to record its location(s)
+in the Internet with the Name Binding Service for its domain.
+
+The Introduction Service can relay MFP Initiator Hello messages from an
+Initiator to a Responder during an MFP session startup handshake, to
+enable session bring-up between two Machines, one or both of which may
+be behind a NAT or firewall device. The IP address and UDP port number
+of one or more Introducers will be reported by the Name Binding Service
+in response to queries for Machine Addresses. An Introduction will be
+forwarded through the MFP session that the Responder is using to maintain
+its implicit registration. MFPNet will automatically use Introducers for
+MFPNet_flow_open()s, when available.
+
+A "name registration" records the presence of other Identities at the
+current Machine into the Name Binding Service. Note that Identities
+(Machine and others) need not all be in the same domain. For example,
+you may have a Person Identity in domain "example.com" and a Machine
+Identity in domain "test.amicima.com". The Name Binding Service for
+"example.com" will record that your Person Identity can be reached at
+the Machine ID in "test.amicima.com", and the Name Binding Service for
+"test.amicima.com" will record the IP addresses at which your Machine
+can be reached.
+
+The Name Binding Service can be queried for all of the Machines at which
+an Identity may be, and all of the addresses at which a Machine may be.
+Note that some of the information returned by the Name Binding Service
+may be outdated; that is, a Machine may no longer be at one or more of
+the listed addresses, or an Identity may no longer be at one or more of
+the listed Machines. A check of credentials should always be performed
+when forming connections based on information obtained from the Name
+Binding Service.
+
+
+Locating Name Binding and Identity Establishing Servers in the DNS
+------------------------------------------------------------------
+The locations of Name Binding Servers and Identity Establishing Servers
+may be bootstrapped from the DNS if no other information is on hand.
+MFPNet automatically fetches these bootstrap records whenever it is asked
+to establish, register, or look up any identity at a domain for which
+it does not already have sufficient addresses of Name Binding of
+Establishing servers.
+
+Name Binding and Establishing Service bootstrap records are DNS Text
+(TXT) records at "ns.mfpnet.<domain-name>" and "establish.mfpnet.<domain-name>",
+respectively. The choice was made to use TXT records instead of a
+multi-step chain of PTR and/or SRV records in order to maximize compatibility
+and reduce the number of DNS lookups and corresponding round trip times
+when bootstrapping is required. There may be multiple TXT records at
+that domain name, each one specifying a distinct Name Binding Server.
+Each TXT record should be composed of two or more tagged strings, exactly
+one of which is the Machine ID, including the Machine idtype of "00" and
+tagged with "i=". There may be one or more IP address strings, tagged
+with "a=" and including the IP address and UDP port. By default, the
+Machine ID is assumed to be in the same domain. If the Machine ID is in
+a different domain, the domain can be specified with a "d=" tag. If a
+foreign domain is specified, then no IP addresses should be specified
+(the Name Binding Service for the foreign domain will supply the IP
+address and UDP port pair(s) for the Machine, and any IP addresses in
+the TXT record will be ignored).
+
+For example:
+
+ ns.mfpnet.amicima.com.        IN TXT "i=001918171615141312111009080706050403020100" "a=10.9.8.7:19991" "a=10.2.3.4:12345"
+                               IN TXT "i=003938373635343332313029282726252423222120" "a=10.11.12.13:19991"
+                               IN TXT "i=00FEDCBA9876543210FEDCBA9876543210FEDCBA98" "d=example.com"
+
+ establish.mfpnet.amicima.com. IN TXT "i=005958575655545352515049484746454443424140" "a=10.9.8.7:29992"
+
+The above records indicate that: there are three Bootstrap Name Binding
+Servers (ns), one at Machine Address
+"001918171615141312111009080706050403020100@amicima.com" having two IP
+addresses: 10.9.8.7 and 10.2.3.4, with UDP port numbers 19991 and 12345,
+respectively, another at Machine Address
+"003938373635343332313029282726252423222120@amicima.com" having IP address
+10.11.12.13 and UDP port number 19991, and one at Machine Address
+"00FEDCBA9876543210FEDCBA9876543210FEDCBA98@example.com", where the
+"example.com" Name Binding Service will provide its addresses; there is
+one establishing server at Machine Address
+"005958575655545352515049484746454443424140@amicima.com" having IP address
+10.9.8.7 and UDP port number 29992.
+
+When an MFPNet client connects to a Name Binding Server, the server can
+provide a list of other potential Name Binding Servers for the Domain,
+and their IP addresses and UDP port numbers. The DNS records listed above
+serve to bootstrap the process of finding more Name Binding Servers, not
+all of which must be listed in the DNS. This mechanism allows a Domain
+to have a distributed and dynamic Name Binding Service. Name Binding may
+be performed by a central server, a tightly-coupled set of central
+servers, a loosely-coupled set of central or distributed servers, or
+fully distributed to some or all of the client nodes. The protocol used
+by clients is the same in all these cases, and clients are prepared to
+deal with multiple candidate nodes for the service, not all of which may
+be reachable, so clients from other domains that use alternative
+implementations may participate without modification.
+
+
+MFPNet Cryptography for MFP
+---------------------------
+The MFPNet protocols and policies define a cryptographic profile for MFP.
+That profile is the same as mfp_defcrypto from MFP release 20060511 or
+later, except:
+
+   o The 128 bit AES Default Session Key is defined to be the
+     16 ASCII bytes "amicima MFPNet 1"
+   o Diffie-Hellman keying is preferred, but Legacy keying mode is
+     enabled and sent by Initiators for backwards compatibility with
+     existing MFPNet applications. Legacy keying mode is deprecated
+     and may be removed in the future.
+   o In order for a certificate to be trustworthy, it must
+      - have a 21-byte Subject (an mfpnet_identity_t) with an idtype
+        of 0 (MFPNET_IDTYPE_MACHINE) and an iddata equal to the
+        fingerprint of the public key of the certificate
+      - have a good and current Domain Signature
+      - be in a domain whose Domain Certificate has a good and current
+        Gold Certificate signature
+
+
+A Note About Machine Identities
+-------------------------------
+A Machine ID's name portion (the iddata of the mfpnet_identity_t) is
+required to be the SHA-1 of the public key field of the Machine Certificate
+(the "Key Fingerprint"). This serves three important considerations:
+Machine IDs are evenly distributed across the namespace; it is hard to
+choose a specific Machine ID; Machine IDs will (with high probability)
+have globally unique names across all Domains.
+
+
+A Note About MFPAuth
+--------------------
+The MFPNet Library includes the MFPAuth module, used as a foundation for
+the internal communication of MFPNet and MFPAC. You may use MFPAuth for
+your own purposes, but its API is not guaranteed to remain fixed in the
+future.
+
+
+Using MFPNet
+------------
+An MFPNet program should include the "mfpnet.h" header file.
+
+To create an MFP Instance for use with MFPNet, use MFPNet_start() instead
+of MFP_start(). The certificate and private key passed to this function
+are the Machine Identity of this MFP Instance.
+
+Many MFPNet operations, such as establish, register, and lookup, are
+asynchronous, and will return their results on loopback Lightweight
+Message (LWM) Ports.
+
+To establish an identity in a domain and obtain the domain's endorsement,
+use MFPNet_establish(). If you are establishing a Machine Identity, you
+will need to use MFPNet_change_cert() to load the newly endorsed Machine
+certificate into the MFPNet Instance for further use. Until your Machine
+Identity is established and loaded into the MFPNet Instance, you will
+not be able to communicate with other MFPNet Machines, including Name
+Binding servers. MFPNet_make_new_machine_cert() is a convenience routine
+to generate a fresh Machine Certificate that conforms to the naming
+restriction for Machine Identities: the 20-byte name/iddata portion
+MUST be the MFPCert_key_fingerprint() of the certificate (the SHA-1 of
+the public key).
+
+To register the Machine and its current IP address(es) in the Internet
+into the Name Binding Service, use MFPNet_implicit_register().
+
+To register that other Identities may be found at this Machine into the
+Name Binding Service, use MFPNet_name_register(). Note: you should issue
+MFPNet_implicit_register() before registering other Identities so that
+your Machine can be found.
+
+MFPNet will automatically maintain your registration(s) with the Name
+Binding Service and keep IP address information current even if your IP
+address changes (IP mobility) or if connectivity to the Name Binding
+Service is interrupted. MFPNet will also maintain a connection to at
+least one Name Binding server for your Machine's domain in order to use
+that as an incoming Introducer service.
+
+Use MFPNet_flow_open() to open a flow to a Machine in a Domain. MFPNet
+will open an MFP flow over an existing MFP session that corresponds to
+the Machine Address, or if one does not exist, start a new MFP session
+using cached addresses for that Machine Address, automatically query the
+Name Binding Service for the domain associated with that Machine Address
+to find additional addresses to try, use any Introducers that are cached
+and/or returned in the Name Binding lookup if available in order to
+bypass intervening NAT or firewall devices, and authenticate the session
+Machine credentials using the PKI.
+
+You may use MFPNet_lookup() to manually locate the Machines at which an
+Identity is registered. Note that a lookup may return results incrementally,
+and that some results may be outdated (potentially having come from
+cache), or repeated. Typically you will use MFPAC functions to form
+authenticated connections to all Machines hosting an Identity, or MFPGroup
+functions to automatically establish a connection to a group or additional
+group members.
+
+You may also use MFPNet_subscribe() to manually locate the Machines at
+which an Identity is registered. Instead of a "one-shot" lookup as
+provided by MFPNet_lookup(), the Name Binding service will be notified
+to keep an ongoing subscription to your request for this information,
+and you will receive updated lookup results any time the requested
+Identity is added to the Name Binding system. MFPNet automatically
+maintains connections to the necessary Name Binding servers, reconnecting
+and resubmitting the subscription if connectivity is lost. MFPNet_unsubscribe()
+may be used to remove an outstanding subscription request. Typically you
+will use MFPAC functions to subscribe to authenticated connections to
+all Machines hosting an Identity.
+
+
+About MFPAC
+-----------
+MFPAC simplifies creating one-to-one and one-to-many authenticated
+connections between MFPNet entities. MFPAC automates the process of
+looking up the Machine Addresses associated with an entity's MFPNet
+Address, connecting to those (one or more) Machines, and performing
+bidirectional authentication prior to delivering messages.
+
+MFPAC has two basic modes of operation. In one, Requests are generated
+and sent to any and all of the Machines where an entity is registered,
+replies are received in-band or out-of-band and tracked until completion
+or timeout. In the other, Subscribe Requests are generated and sent to
+any and all of the Machines where an entity is registered, and then
+messages may be broadcast to all subscribers which have been accepted.
+The former mode of operation is designed for implmenting applications
+such as text messaging, call control for VOIP connections, and shared
+file access. The latter mode is designed for implementing applications
+such as user presence (available/idle/away) or process status or sensor
+monitoring.
+
+
+Using MFPAC
+-----------
+To use MFPAC, a program must include the "mfpac.h" header file, and
+create at least one MFPACInstance, by calling MFPAC_start(). MFPAC_start
+takes an MFP port number on which it will listen for incoming connections.
+Except in special circumstances, it is recommended that DEFAULT_MFPAC_MFP_PORT
+(port number 97) be used.
+
+For each Identity that a user wishes to use with MFPAC, a new MFPAC
+Controller, referred to (somewhat confusingly) as an "MFPAC", must be
+created using the MFPAC_new() function. This function uses the provided
+selfCert and privateKey in order to authenticate itself bidirectionally
+during MFPAC operations. Each Identity associated with MFPAC should, in
+most cases, also be registered with the MFPNet Name Binding system. It
+is recommended but not required that MFPAC_new() and any associated
+MFPAC_service_new() be called prior to registering with the Name Binding
+system so that the Identity is already prepared to receive incoming MFPAC
+connections.
+
+Once an Identity is registered with MFPAC using MFPAC_new(), it may be
+used to create MFPAC Services or MFPAC Channels.
+
+
+MFPAC Services
+--------------
+An MFPAC Service is created for an Identity registered with MFPAC by
+calling MFPAC_service_new(). A Service is associated with a specific
+Channel Name (a string), and may be created to accept "Requests",
+"Subscribes", or both.
+
+If a Service is created to accept Requests, incoming Requests will be
+delivered to the MFP LWM port that was specified when the Service was
+created. These Requests may be responded to in-band by using
+MFPAC_response_send() or out-of- band by using MFPAC_response_get_cookie()
+to get the associated cookie, connecting to the responsePort, and sending
+the cookie. For convenience, MFPAC_response_cookie_flow_write() assembles
+a message and writes it on an MFP flow created to the response port.
+Requests may also be silently discarded using MFPAC_response_discard().
+
+If a Service is created to accept Subscribes, incoming Subscribe Requests
+will be delivered to the MFP LWM port that was specified when the Service
+was created. These Subscribe Requests may be accepted or rejected. To
+accept, call MFPAC_subscriberequest_accept(), which takes an optional
+data message. Once accepted, this subscriber will also receive the
+messages subsequently sent using MFPAC_service_broadcast(). To reject,
+call MFPAC_subscribereqest_reject(). This subscriber will NOT receive
+any messages that are subsequently broadcast.
+
+To stop using and dispose of a Service, call MFPAC_service_dispose().
+
+
+MFPAC Channels
+--------------
+An MFPAC Channel is created from an Identity registered with MFPAC to a
+remote entity registered with a remote MFPAC by calling MFPAC_channel_new().
+A Channel is created to a specific target MFPNet Address and Channel
+Name. Channels may be created with the "shouldSubscribe" flag set.
+
+A Channel created without "shouldSubscribe" will immediately initiate
+connections to all known locations where the target Address is located,
+using the MFPNet Name Binding service to look up the target. Upon
+successful connection to the MFPAC MFP port at each of the Machines
+associated with the target, the Channel requests to be connected with
+the target, and specifies which of the target's Services by Channel Name.
+If the target Identity is not known by the far MFPAC, or if the Channel
+Name does not correspond to a Service registered to that target, the
+connection is dropped. The Channel then identifies itself to the remote
+MFPAC Service, proving its identity by using the local private key to
+sign a nonce provided by the far end. If this fails, the far end MFPAC
+Service will refuse the connection. The Channel then requires that the
+far end MFPAC Service identify itself to the local Channel by using its
+private key to sign a nonce provided by the near end. If this also
+succeeds, any pending and subsequent Requests will be delivered. Note
+that Requests are NOT delivered in any case where bidirectional
+authentication fails, so these Requests may safely contain sensitive
+information.
+
+A Channel created with "shouldSubscribe" operates similarly, but it uses
+MFPNet_subscribe() instead of MFPNet_lookup() to find the potential
+target Machine Addresses. This means that as long as the Channel exists,
+any new appearances of the requested target that appear will be automatically
+connected to, and the above authentication performed. Also, a Channel
+created with "shouldSubscribe" automatically creates an associated
+Subscribe Request which is sent immediately upon successful authentication.
+
+Once a Channel has been created, Requests may be created and sent using
+MFPAC_channel_send_request(). This delivers a Request to all of the
+targets located by the Channel. In-band Responses will be sent back over
+the MFP LWM port associated with the Channel. A Channel tracks the
+completion of the lookup (in the case where "shouldSubscribe is not set),
+or the eventual timeout of the request, and notifies with a completion
+message with the number of successful deliveries and the number of
+timeouts. Responses that arrive out-of-band are also tracked, as the
+out-of-band cookie is passed to MFPAC_check_cookie() to verify that it
+is correct and also perform this accounting. For convenience,
+MFPAC_check_cookie_flow_read() exists as a complement to
+MFPAC_response_cookie_flow_write().
+
+If "shouldSubscribe" is set, the Channel will also deliver the results of
+each Subscribe Request and any subsequent Broadcasts that are received over
+the MFP LWM port associated with the channel.
+
+To stop using and dispose of a Channel, call MFPAC_channel_dispose()
+
+
+Using the Sample Establishing and Name Binding Servers
+------------------------------------------------------
+The MFPNet Library includes sample implementations of an Establishing
+Server and a Name Binding & Introduction Server. These sample implementations
+do not implement advanced features supported by MFPNet, particularly the
+capability to distribute the Name Binding Service among multiple,
+cooperating Machines, or for these servers to have Machine IDs in different
+Domains than the one they serve.
+
+The two programs, "es_mfpnet" and "ns_mfpnet", respectively, expect
+to be run from a directory with the following hierarchy below it:
+
+   certs/
+         ESTABLISH.cert
+         ESTABLISH.cert.priv
+         ESTABLISH_MACHINE.cert
+         ESTABLISH_MACHINE.cert.priv
+         NAMESERVER.cert
+         NAMESERVER.cert.priv
+         NAMESERVER_MACHINE.cert
+         NAMESERVER_MACHINE.cert.priv
+         silver.cert
+         silver.cert.priv
+ 
+   establish/
+             endorsements
+
+The sample Establishing Server, es_mfpnet, requires an Establishing
+Credential (idtype MFPNET_IDTYPE_ESTABLISHSERVER, 0xff) in ESTABLISH.cert,
+and a Machine Identity in ESTABLISH_MACHINE.cert. The server will use
+the silver.cert and silver.cert.priv private key to endorse other
+certificates.  es_mfpnet will by default run on UDP port 29992, but takes
+as its single command line argument an alternate UDP port number. The
+server will record its endorsements in the endorsements file. This log
+keeps the names, key fingerprints, and serial numbers of endorsed
+certificates to enforce the endorsement policy of "first come, first
+served". This file should be considered critical and kept as safe from
+destruction as private key files. Note: es_mfpnet will not endorse
+privileged idtypes (those from 0xc0 through 0xff, including
+MFPNET_IDTYPE_ESTABLISHSERVER and MFPNET_IDTYPE_NAMESERVER). Endorsements
+for those identities must be made manually with mfpcerttool.
+
+The sample Name Binding & Introduction Server, ns_mfpnet, requires a
+Name Binding Credential (idtype MFPNET_IDTYPE_NAMESERVER, 0xfe) in
+NAMESERVER.cert, and a Machine Identity in NAMESERVER_MACHINE.cert. The
+server will use the silver.cert to verify that name and implicit
+registrations are authentic. The server will by default run on UDP port
+19991, but takes as its single command line argument an alternate UDP
+port number. ns_mfpnet maintains no persistent state. ns_mfpnet serves
+as an Introduction Server to facilitate bringing up sessions to Machines
+behind firewalls and NATs.
+
+mfpnetcerttool can be used to create the first, unsigned Machine certificate
+for ESTABLISH_MACHINE.cert/.cert.priv. mfpcerttool must then be used to
+give it the endorsement of silver.cert, and to create and sign the
+ESTABLISH.cert and NAMESERVER.cert. Once the establishing server is
+running, mfpnetcerttool can talk to it to create a signed
+NAMESERVER_MACHINE.cert, although you may want to use mfpcerttool
+anyway to exert greater control over the expiration date. The endorsements
+on these certificates by the silver.cert must be renewed before their
+expiration dates to avoid service interruptions. These programs must be
+restarted to reload the certificate files.
+
+See the companion document on the amicima web site, "HOW TO: Obtain
+amicima's MFPNet Root Authority Endorsement for your Domain Certificate",
+to see how to create silver.cert, obtain an endorsement for it, and place
+it in the DNS.
+

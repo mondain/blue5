@@ -1,0 +1,369 @@
+MFP: The Secure Media Flow Protocol
+===================================
+API Version 1.0 README
+
+
+Introduction
+------------
+The Secure Media Flow Protocol ("MFP") is a new data transport protocol
+for the Internet that addresses shortcomings of TCP and UDP for real-time
+multimedia applications with features particularly useful for peer-to-peer
+applications. MFP provides secure, authenticated sessions between Internet
+hosts. These sessions then contain multiple, simultaneous, prioritized,
+congestion controlled flows of data or media. The protocol specification may
+be found at http://www.amicima.com/developers/documentation.html
+
+The MFP API 1.0 provides programmers with an easy to use interface
+conceptually similar to the traditional BSD Sockets API, including integer
+names (descriptors) for Flows, Ports, and other objects, read and write
+primitives, and a means similar to select()/poll() to wait for events
+on these objects. Application-specific security and cryptographic services
+plug-in via a simple callback mechanism.
+
+The MFP Library provided here includes an implementation of MFP API 1.0 plus
+supporting utilities, including an implementation of MFP Simplified Digital
+Certificates Version 1 ("MFPCert"); an easily extended baseline cryptographic
+plug-in, based on MFPCert and OpenSSL, providing RSA, AES128, and HMAC services
+to MFP ("mfp_defcrypto"); a structured message encapsulation mechanism
+("MFPMsg"); and an event-driven runloop framework to simplify common
+network programming tasks ("MFPMU").
+
+
+Runtime and Library Dependencies
+--------------------------------
+The MFP Library is built on MObj, so the MObj runtime must be initialized
+before MFP, mfp_defcrypto, MFPCert, MFPMsg, or MFPMU are used for the
+first time. The first line of your program should be "MObj_runtimeInit()";
+see the MObj README for more information. You must link with the MObj
+library and its dependencies. MFP requires MObj release 20050728 or later.
+
+MFP makes use of POSIX Threads; your program must be compiled and linked
+to use pthreads (typically -pthread on Unix, for Win32 applications, see
+http://sources.redhat.com/pthreads-win32/).
+
+The mfp_defcrypto and MFPCert components use OpenSSL to provide cryptographic
+services such as RSA, AES128, SHA-1, HMAC-SHA1, and random number
+generation. You must link with OpenSSL version 0.9.7b or later (typically
+-lcrypto on open-source Unix distributions, or see http://www.openssl.org/
+for OpenSSL sources, license information, and links to Win32 DLL builds),
+or replace/eliminate mfp_defcrypto and MFPCert.
+
+MFPMsg uses zlib to compress messages. See RFC1950 and RFC1951. You must
+link with zlib (typically -lz on open-source Unix distributions, or see
+http://www.zlib.net/ for sources, license information, and links to Win32
+DLL builds) version 1.1.4 or later, or eliminate MFPMsg.
+
+MFPMU uses MFPMsg, so if you need to eliminate MFPMsg, you must also
+eliminate MFPMU.
+
+
+Header Files
+------------
+You will typically include the following header files, depending on the
+services you need/use/provide:
+
+   mfp_api.h -- the MFP API v1.0.
+
+   mfp_callbacks.h -- defines the structure of the callbacks used by
+     MFP API v1.0, including the cryptographic plug-in interface and the
+     External Hello callback interface. Only needed when defining or
+     using the cryptographic plug-in or External Hello functionality.
+
+   mfp_defcrypto.h -- defines the interface to the default, baseline
+      cryptographic plug-in provided by the library.
+
+   mfpcert.h -- the MFPCert interface.
+
+   mfpmsg.h -- the MFPMsg API.
+
+   mfpmu.h -- the MFPMU API.
+
+
+MFPCert and mfp_defcrypto
+-------------------------
+The cryptographic services specified in the MFP protocol definition are
+abstract and are usually specified as "defined by the application". The
+cryptographic plug-in interface is the means by which the application
+provides concrete cryptographic services to the MFP implementation, which
+then dictates the specific cryptographic operations, protocols, and
+representations used in abstract MFP fields. The mfp_defcrypto module
+is a simple, baseline implementation of this interface that defines the
+following cryptographic profile for MFP:
+
+   o Certificates are MFPCerts in the plain (not the DNS) serialization
+   o Signatures are MFPCert signatures
+   o Symmetric Encryption is the Advanced Encryption Standard
+     (AES, FIPS 197) with 128 bit keys in CBC mode with an IV
+     of all-zeroes
+   o The Session Key Components (Initiator and Responder)
+     as exchanged in the Initial Keying chunks are compound data
+     structures encoded in a chunked fashion, described at the top
+     of mfp_defcrypto.c (and called "micro-chunks"). Micro-chunks
+     carry HMAC negotiation parameters and keying material, which
+     is either Diffie-Hellman public keys or (for "Legacy Keying"
+     mode) blocks of data (10-64 bytes) encrypted to the receiver's
+     Public Key as listed in its MFPCert. The micro-chunk format
+     is extensible, and may be extended in the future to support
+     different ciphers and other cryptograpic options in a
+     backwards-compatible fashion.
+   o The Session Key is asymmetric, with the Initiator and
+     Responder choosing their AES128 keys in the following manner:
+     the Initiator chooses a well-known Diffie-Hellman group
+     (available groups have prime moduli of 1024 bits [the default],
+     1536 bits, and 2048 bits). Each side chooses its DH secret
+     key, computes the public key, and transmits it to the other
+     side. Each side, on receiving the other's public key (K', this
+     side's public key being K), computes the DH shared secret S in
+     the normal way, and calculates AES128 keys and HMAC keys as follows:
+        Encryption:    E = HMAC-SHA1(S, K')[0..15]  (128 bits)
+        Decryption:    D = HMAC-SHA1(S, K)[0..15]   (128 bits)
+        HMAC generation:   HMAC-SHA1(S, E)[0..19]   (160 bits)
+        HMAC verification: HMAC-SHA1(S, D)[0..19]   (160 bits)
+   o For backwards compatibility with previous releases of
+     mfp_defcrypto, Legacy Keying mode is available (but sending
+     legacy keying data is disabled by default for Initiators) in
+     which the AES128 keys are agreed upon in the following manner:
+     for transmitting (encrypting and HMAC generation), the SHA1 of the
+     concatenation of the near side's and far side's plaintext
+     (pre-encryption or post-decryption) keying material is computed,
+     and the first 128 bits (16 bytes) of that becomes the key. For
+     receiving (decrypting and HMAC verification), the SHA1 of the
+     concatenation of the far side's and near side's plaintext
+     keying material is computed, and the first 128 bits (16 bytes)
+     of that becomes the key. NOTE: Legacy Keying mode must be
+     explicitly enabled to be included by Initiators, but Responders
+     will always use it if responding to an Initiator using only
+     Legacy Keying. Responders receiving both DH and Legacy will
+     prefer DH keying.
+   o The 128 bit AES Default Session Key is the 128 bits (16 bytes)
+     given to MFP_defaultcrypto_newState() as defaultAES128SessionKey
+   o The Encrypted Packet is the result of performing the Symmetric
+     Encryption AES128 CBC, optionally with a variable-length HMAC
+     appended. HMAC is never used with the Default Session Key, and
+     is negotiated on a per-session basis for session packets. The
+     HMAC is HMAC-SHA1 with configurable length, 4-20 bytes, computed
+     over the output of the AES128 CBC encryption operation. The
+     default HMAC length is 10 bytes (80 bits), and the default
+     modes are "transmit HMAC if requested by the far end" and "verify
+     HMAC if the far end chooses to use it". If either end commits to
+     sending HMACs for the session, their absence is an error.
+   o Certificates are trustworthy if they are self-signed and
+     are valid at the current time with a one day grace period
+
+A program will usually start by retrieving/reconstituting a certificate
+and its private key from permanent storage, or creating new ones using
+MFPCert functions, and then instantiating a new defaultcrypto state using
+the certificate and private key. The defaultcrypto state is used by
+MFP_defaultcrypto_callback(), along with a selector code, to perform
+cryptographic services for the MFP instance.
+
+MFP requires that another MFP's certificate be trustworthy in order for
+a session to be established to it. mfp_defcrypto's trust policy is that
+the other MFP's MFPCert is self-signed and that today is between valid-from
+minus one day to valid-to plus one day, inclusive. You must override the
+kMFP_crypto_certTrust callback selector to change this policy (for
+example, to require the endorsement of a trusted party).
+
+mfp_defcrypto's HMAC settings can be changed with MFP_defaultcrypto_setHMACMode().
+Changing HMAC settings affects new MFP sessions, not any in progress.
+
+mfp_defcrypto's keying mode can be changed with MFP_defaultcrypto_setKeyMode().
+Changing keying mode settings affects new MFP sessions, not any that
+have already started. NOTE: Legacy Keying mode is deprecated, and
+may be removed in the future. New applications should use Diffie-Hellman
+keying, which is the default. Sending Legacy Keying data is not enabled
+by default for Initiators, but Responders will always fall back to
+it if necessary.
+
+
+Extending mfp_defcrypto
+-----------------------
+The mfp_defcrypto module and its callback, MFP_defaultcrypto_callback(),
+provide the default RSA and AES128 cryptographic services, MFPCert
+services, and certificate trust model to MFP. Usually these services are
+what's desired, although often you will want to change the certificate
+trust policy (for example, to require the endorsement of a trusted
+authority, or to verify against a persistent keychain).
+
+To override callback methods of MFP_defaultcrypto_callback(), provide
+your own callback with the same signature as the default one, and in
+a switch() statement, check for the selectors you want to override.
+For the default case, simply return the result of calling
+MFP_defaultcrypto_callback() with the original parameters. Example:
+
+  static mfp_callback_status_t _my_crypto_callback(
+     mfp_callback_selector_t selector,
+     void *ioParamBlock,
+     void *state)
+  {
+     if( (!ioParamBlock)
+      || (!state)
+     )
+       return kMFP_callback_paramErr;
+
+    switch(selector)
+    {
+    case kMFP_crypto_certTrust:
+      return _do_my_certTrust(ioParamBlock, state);
+    default:
+      return MFP_defaultcrypto_callback(selector, ioParamBlock, state);
+    }
+  }
+
+Then, give _my_crypto_callback to MFP_start() instead of
+MFP_defaultcrypto_callback.
+
+See mfp_defcrypto.c to see how all of the cases are handled, if you want
+to provide different cryptographic, certificate, or trust services.
+
+
+MFP
+---
+An MFP engine instance ("MFP instance" or "instance") must be created
+and started before MFP can be used in a process. The instance is bound
+to a single UDP port. All MFP traffic for that instance then uses that
+UDP port. The cryptographic callback function (for example,
+MFP_defaultcrypto_callback) and the crypto plug-in's state, if any, is
+passed to MFP_start() to create the instance and return a handle to it.
+The instance handle is passed to nearly all MFP API functions. Note:
+currently, only a single interface running IP Version 4 is supported, 
+future releases will add multiple-interface support, including IPv4 TCP
+tunnel interfaces and IPv6 UDP interfaces.
+
+A listening port ("port") is a named destination to which flows from
+other MFPs are opened. A port is created with MFP_port_open() and
+destroyed with MFP_port_close(). When an incoming flow comes in on a
+port, it is accepted (and turned into a flow descriptor) with
+MFP_port_accept(). Note: because flow opening is only acknowledged after
+the application accepts the flow, persistent failure to accept a flow on 
+an open port may cause the far end to terminate its session, potentially
+destroying other open flows. MFP_poll() and MFP_select() activate for the
+read condition when a port has a flow waiting to be accepted.
+
+A flow is opened to a port in another MFP with MFP_flow_open(). One or
+more candidate IP addresses, as well as an identity block, may be used
+to specify the desired endpoint of the flow. The identity block is opaque
+to MFP, and its meaning is defined by the cryptographic plug-in in use.
+mfp_defcrypto defines it as a private encoding of the subject and issuer
+of the MFPCert of the desired destination (MFPCert provides a utility
+function to create an identity block from subject and issuer). The
+instance will try to match the requested flow to an existing session,
+or create a new session if no match currently exists. Additional candidate
+IP addresses may be added with MFP_flow_add_addrs(). A flow to the same
+destination as an existing flow may be created with
+MFP_flow_open_same_session(). Flows are closed with MFP_flow_close().
+A flow becomes writable (activating the write condition for MFP_poll()
+and MFP_select()) when it becomes bound to a session in the Open state.
+
+Unlike TCP streams, an MFP flow is datagram-oriented. MFP flow datagrams
+are called "chunks". Each chunk is limited to 1024 bytes. MFP assigns a
+monotonically increasing sequence number for each chunk transmitted in
+a flow. A new outbound flow isn't fully started (that is, no indication
+of a new flow is sent to the far end's port) until the first chunk (which
+may be the only chunk) is written into the flow. Each chunk may be sent
+with selectable reliability; however, the first and last chunks of a
+flow are always sent with full reliability.
+
+Chunks may be read from the flow either in sequence number order (which
+may block indefinitely while retransmissions of fully- or partially-reliable
+chunks attempt to fill sequence number holes -- this is the default receive
+mode), or immediately as they arrive (with flag MFP_FLOW_F_RXORDER). Note
+that a consequence of the flow opening mechanism is that the first chunk
+received is always the first chunk sent.
+
+Flows are prioritized; chunks for higher priority flows are sent before
+those of lower priority ones. Flows with Medium or High priority are
+considered "time critical". The congestion control and avoidance mechanism
+may operate differently to facilitate the timely delivery of time critical
+data.
+
+Lightweight Messages ("LWMs") are a simple, insecure, unreliable,
+non-congestion-controlled datagram delivery mechanism similar to UDP,
+but within an MFP instance and using the instance's UDP port. LWMs are
+encrypted with the default session key. LWM ports are endpoints for LWMs,
+similar to UDP ports. LWM ports are always writable, and activate for
+read when a message is ready to be MFP_lwm_recvfrom()ed from it. LWM
+ports may be used in loopback mode to form a local datagram conduit that
+can be integrated in MFPMU runloops along with external traffic.
+
+
+MFPMsg
+------
+MFPMsg provides a simple key-value message service built on the MObj's
+object serialization. Keys are case-sensitive C strings. Values may be
+32-bit integers, 64-bit integers, 32-bit IEEE floating point numbers,
+C strings, arbitrary blocks of bytes, IPv4 or IPv6 addresses, or any of
+the following types of MObj objects:
+
+  MObjBitVector, MObjBoolean, MFPCert, MObjData, MObjFloat,
+  MObjInteger, MObjInteger64, MFPMsg, MObjSockaddr, MObjString
+
+or the following types of MObj collections:
+
+  MObjArray, MObjDictionary, MObjList, MObjSet, MObjSparseArray
+
+where the members of those collections are limited to the types of objects
+listed above (including other collections).
+
+Note that MFPMsg is a MObj object, so it may be retained, released, and
+autoreleased like any other MObj object.
+
+MFPObjInStreamer and MFPObjOutStreamer provide serialization, compression,
+and chunking services to facilitate transmission and reception of MFPMsgs
+in MFP flows and LWMs.
+
+
+MFPMU
+-----
+MFPMU provides a simple, callback-based runloop for network-event-driven
+programming. It maintains a MObjTimerList for periodic tasks, and makes
+sure a MObjAutoreleasePool exists for callbacks and firing MObjTimers.
+
+MFPMU's data structures are not thread-safe. You should add descriptors
+or timers to an mfpmu either synchronously before running it with
+MFPMU_runloop(), or from within a callback or timer executing from inside
+the runloop.
+
+MFPMU lets you add a callback handler for primitive MFP descriptor events,
+such as readable, writable, or exception, or higher level constructs,
+such as MFPMsg arrival or a transaction reply. There may be only one
+callback registered at any one time for a specific MFP descriptor.
+
+For primitive descriptor events, your callback will be called several
+times at the begining of each time through the runloop to ask whether
+its descriptor should be MFP_poll()ed for read, write, or exception
+conditions, by calling it with action MFPMU_ACTION_READ_CHECK,
+MFPMU_ACTION_WRITE_CHECK, or MFPMU_ACTION_EXCEPTION_CHECK, respectively.
+If any of the desired conditions activate that time through the loop,
+your callback will called with MFPMU_ACTION_READ_DO, MFPMU_ACTION_WRITE_DO,
+or MFPMU_ACTION_EXCEPTION_DO, respectively, to service that condition.
+After calling MFPMU_remove_fd() for your descriptor, your callback will
+be called exactly one more time at the end of the runloop with action
+MFPMU_ACTION_REMOVE, to allow you to perform any cleanup. You are
+responsible for closing any MFP descriptors (the mfpmu won't do it for
+you).
+
+As a convenience, MFPMU provides buffering, chunking, transmission,
+reception, and reassembly of MFPMsgs for you. This service is limited
+to flows (not LWM ports). Once a flow descriptor is registered with an
+mfpmu with MFPMU_register_msg(), you may send MFPMsgs on it with
+MFPMU_msg_transmit(). MFPMU will buffer your MFPMsgs as needed, serialize,
+compress, chunk, and transmit them as quickly as can be done through the
+flow. As serialized, compressed, and chunked MFPMsgs arrive on the flow,
+they are reassembled, decompressed, and reconstituted. As each complete
+MFPMsg becomes available, your callback receives MFPMU_ACTION_MSG_REPLY
+with the MFPMsg. MFPMU_ACTION_MSG_READY is sent to your callback only
+once to indicate that the flow has become writable, indicating that the
+session carrying it has come up. MFPMU_ACTION_MSG_TXFLUSHED is sent when
+the message transmit queue empties, in case you want to close the flow
+immediately after transmitting some messages.
+
+As a further convenience, MFPMU provides a single-ended transaction model
+on flows for MFPMsgs with MFPMU_register_trans(). A flow registered for
+transactions is similar to one registered for MFPMsgs; however, when
+transmitting an MFPMsg, it may be done in transaction mode with
+MFPMU_trans_send(), where it will be assigned a transaction ID, and a
+callback assigned to be called when a reply for that transaction comes in
+(or a timeout occurs with no reply). Use MFPMsg_setReplyTIDFromMsg() to
+copy the transaction ID from a request MFPMsg to a reply MFPMsg, and reply
+using MFPMU_msg_transmit().
