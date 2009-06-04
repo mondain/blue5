@@ -20,11 +20,9 @@ package ws.blue5.net.rtmpe;
  */
 
 import java.math.BigInteger;
-import java.security.InvalidKeyException;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.Security;
 import java.security.spec.KeySpec;
@@ -33,7 +31,6 @@ import java.util.Random;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyAgreement;
-import javax.crypto.Mac;
 import javax.crypto.interfaces.DHPublicKey;
 import javax.crypto.spec.DHParameterSpec;
 import javax.crypto.spec.DHPublicKeySpec;
@@ -202,25 +199,7 @@ public class RTMPEHandshake implements IHandshake {
 	    byte[] sharedSecret = keyAgreement.generateSecret();
 	    logger.debug("shared secret (" + sharedSecret.length + " bytes): " + Utils.toHex(sharedSecret));
 	    return sharedSecret;
-	}
-	
-	protected static byte[] calculateHMACSHA256(byte[] message, byte[] key) {
-		byte[] output = null;
-		try {
-			Mac mac = Mac.getInstance("HmacSHA256");
-			mac.init(new SecretKeySpec(key, "HmacSHA256"));
-			output = mac.doFinal(message);
-		} catch (SecurityException e) {
-			logger.error("Security exception when getting HMAC", e);
-			throw new RuntimeException(e);
-		} catch (NoSuchAlgorithmException e) {
-			logger.error("HMAC SHA256 does not exist");			
-			throw new RuntimeException(e);
-		} catch (InvalidKeyException e) {
-			logger.error("Invalid key", e);
-		}
-		return output;
-	}									
+	}						
 
 	public IoBuffer getData() {
 		return data;
@@ -255,7 +234,7 @@ public class RTMPEHandshake implements IHandshake {
 	        int afterDigestOffset = digestOffset + SHA256_DIGEST_LENGTH;
 	        buf.position(afterDigestOffset);
 	        buf.get(message, digestOffset, HANDSHAKE_SIZE - afterDigestOffset);
-			byte[] digest = calculateHMACSHA256(message, CLIENT_CONST);
+			byte[] digest = Utils.calculateHMACSHA256(message, CLIENT_CONST);
 			buf.position(digestOffset);
 			buf.put(digest);
 			buf.rewind();
@@ -311,7 +290,7 @@ public class RTMPEHandshake implements IHandshake {
 			int afterDigestOffset = digestOffset + SHA256_DIGEST_LENGTH;
 			buf.position(afterDigestOffset);
 			buf.get(message, digestOffset, HANDSHAKE_SIZE - afterDigestOffset);
-			byte[] digest = calculateHMACSHA256(message, SERVER_CONST);
+			byte[] digest = Utils.calculateHMACSHA256(message, SERVER_CONST);
 			byte[] serverDigest = new byte[SHA256_DIGEST_LENGTH];
 			buf.position(digestOffset);
 			buf.get(serverDigest);
@@ -334,7 +313,7 @@ public class RTMPEHandshake implements IHandshake {
 				afterDigestOffset = digestOffset + SHA256_DIGEST_LENGTH;
 				buf.position(afterDigestOffset);
 				buf.get(message, digestOffset, HANDSHAKE_SIZE - afterDigestOffset);
-				digest = calculateHMACSHA256(message, SERVER_CONST);
+				digest = Utils.calculateHMACSHA256(message, SERVER_CONST);
 				serverDigest = new byte[SHA256_DIGEST_LENGTH];
 				buf.position(digestOffset);
 				buf.get(serverDigest);
@@ -354,7 +333,7 @@ public class RTMPEHandshake implements IHandshake {
 			logger.debug("shared secret: " + Utils.toHex(sharedSecret));
 			//session.setServerPublicKey(serverPublicKey);
 
-			byte[] digestOut = calculateHMACSHA256(serverPublicKey, sharedSecret);
+			byte[] digestOut = Utils.calculateHMACSHA256(serverPublicKey, sharedSecret);
 			try {
 				Cipher cipherOut = Cipher.getInstance("RC4");
 				cipherOut.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(digestOut, 0, 16, "RC4"));
@@ -363,7 +342,7 @@ public class RTMPEHandshake implements IHandshake {
 				throw new RuntimeException(e);
 			}
 
-			byte[] digestIn = sha256(session.getClientPublicKey(), sharedSecret);
+			byte[] digestIn = Utils.calculateHMACSHA256(session.getClientPublicKey(), sharedSecret);
 			try {
 				Cipher cipherIn = Cipher.getInstance("RC4");
 				cipherIn.init(Cipher.DECRYPT_MODE, new SecretKeySpec(digestIn, 0, 16, "RC4"));
@@ -387,8 +366,8 @@ public class RTMPEHandshake implements IHandshake {
 			}			
 			byte[] message = new byte[HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH];
 			partTwo.get(message);
-			byte[] digest = calculateHMACSHA256(session.getClientDigest(), SERVER_CONST_CRUD);
-			byte[] signature = calculateHMACSHA256(message, digest);
+			byte[] digest = Utils.calculateHMACSHA256(session.getClientDigest(), SERVER_CONST_CRUD);
+			byte[] signature = Utils.calculateHMACSHA256(message, digest);
 			byte[] serverSignature = new byte[SHA256_DIGEST_LENGTH];			
 			partTwo.get(serverSignature);
 			if(Arrays.equals(signature, serverSignature)) {
@@ -405,7 +384,7 @@ public class RTMPEHandshake implements IHandshake {
 			byte[] bytesFromServer = new byte[SHA256_DIGEST_LENGTH];
 			buf.position(HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH);
 			buf.get(bytesFromServer);
-			byte[] bytesFromServerHash = calculateHMACSHA256(session.getSwfHash().getBytes(), bytesFromServer);
+			byte[] bytesFromServerHash = Utils.calculateHMACSHA256(session.getSwfHash().getBytes(), bytesFromServer);
 			// construct SWF verification pong payload
 			IoBuffer swfv = IoBuffer.allocate(42);
 			swfv.put((byte) 0x01);
@@ -433,11 +412,11 @@ public class RTMPEHandshake implements IHandshake {
 			Random random = new Random();
 			random.nextBytes(randomBytes);
 			IoBuffer buf = IoBuffer.wrap(randomBytes);
-			byte[] digest = calculateHMACSHA256(session.getServerDigest(), CLIENT_CONST_CRUD);
+			byte[] digest = Utils.calculateHMACSHA256(session.getServerDigest(), CLIENT_CONST_CRUD);
 			byte[] message = new byte[HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH];
 			buf.rewind();
 			buf.get(message);
-			byte[] signature = calculateHMACSHA256(message, digest);
+			byte[] signature = Utils.calculateHMACSHA256(message, digest);
 			buf.put(signature);
 			buf.rewind();
 

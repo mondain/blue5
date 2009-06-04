@@ -23,14 +23,41 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStreamReader;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.apache.mina.core.buffer.IoBuffer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Utility class for manipulation of various types of data. 
  */
 public class Utils {
 
+	private static final Logger logger = LoggerFactory.getLogger(Utils.class);
+	
+	public static byte[] calculateHMACSHA256(byte[] message, byte[] key) {
+		byte[] output = null;
+		try {
+			Mac mac = Mac.getInstance("HmacSHA256");
+			mac.init(new SecretKeySpec(key, "HmacSHA256"));
+			output = mac.doFinal(message);
+		} catch (SecurityException e) {
+			logger.error("Security exception when getting HMAC", e);
+			throw new RuntimeException(e);
+		} catch (NoSuchAlgorithmException e) {
+			logger.error("HMAC SHA256 does not exist");			
+			throw new RuntimeException(e);
+		} catch (InvalidKeyException e) {
+			logger.error("Invalid key", e);
+		}
+		return output;
+	}	
+	
 	public static int readInt24(IoBuffer in) {
 		final byte a = in.get();
 		final byte b = in.get();
