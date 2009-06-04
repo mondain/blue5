@@ -71,12 +71,12 @@ public class RTMPEHandshakeTest {
 		logger.info("A shared secret: " + Utils.toHex(sharedSecretA));
 		logger.info("B shared secret: " + Utils.toHex(sharedSecretB));
 
-		byte[] digestA = RTMPEHandshake.calculateHMACSHA256(publicKeyBytesA, sharedSecretA);
+		byte[] digestA = Utils.calculateHMACSHA256(publicKeyBytesA, sharedSecretA);
 		Cipher cipherA = Cipher.getInstance("RC4");
 		cipherA.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(digestA, 0, 16,
 				"RC4"));
 
-		byte[] digestB = RTMPEHandshake.calculateHMACSHA256(publicKeyBytesA, sharedSecretA);
+		byte[] digestB = Utils.calculateHMACSHA256(publicKeyBytesA, sharedSecretA);
 		Cipher cipherB = Cipher.getInstance("RC4");
 		cipherB.init(Cipher.DECRYPT_MODE, new SecretKeySpec(digestB, 0, 16,
 				"RC4"));
@@ -124,7 +124,7 @@ public class RTMPEHandshakeTest {
 		byte[] sharedSecret = keyAgreementB.generateSecret();
 		logger.info("shared secret: " + Utils.toHex(sharedSecret));
 
-		byte[] digestOut = RTMPEHandshake.calculateHMACSHA256(clientPublicKey, sharedSecret);
+		byte[] digestOut = Utils.calculateHMACSHA256(clientPublicKey, sharedSecret);
 		Cipher cipherOut = Cipher.getInstance("RC4");
 		cipherOut.init(Cipher.DECRYPT_MODE, new SecretKeySpec(digestOut, 0, 16,
 				"RC4"));
@@ -154,7 +154,7 @@ public class RTMPEHandshakeTest {
 		int afterDigestOffset = digestOffset + RTMPEHandshake.SHA256_DIGEST_LENGTH;
 		buf.position(afterDigestOffset);
 		buf.get(message, digestOffset, RTMPEHandshake.HANDSHAKE_SIZE - afterDigestOffset);
-		byte[] digest = RTMPEHandshake.calculateHMACSHA256(message, RTMPEHandshake.SERVER_CONST);
+		byte[] digest = Utils.calculateHMACSHA256(message, RTMPEHandshake.SERVER_CONST);
 		byte[] serverDigest = new byte[RTMPEHandshake.SHA256_DIGEST_LENGTH];
 		buf.position(digestOffset);
 		buf.get(serverDigest);
