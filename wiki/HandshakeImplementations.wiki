@@ -2,11 +2,14 @@
 
 = RTMPD =
 
-== Inbound ==
+== Inbound Handshake ==
 http://www.rtmpd.com/browser/trunk/sources/thelib/src/protocols/rtmp/inboundrtmpprotocol.cpp
 
-== Outbound ==
+== Outbound Handshake ==
 http://www.rtmpd.com/browser/trunk/sources/thelib/src/protocols/rtmp/outboundrtmpprotocol.cpp
+
+== Encrypt/Decrypt protocol ==
+http://rtmpd.com/browser/trunk/sources/thelib/src/protocols/rtmp/rtmpeprotocol.cpp
 
 = Flazr =
 
