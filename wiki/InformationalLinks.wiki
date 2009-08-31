@@ -1,0 +1,5 @@
+#summary Contains links to various related resources.
+
+= Links =
+
+http://en.wikipedia.org/wiki/Protected_Streaming
