@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Text xmlns:mx="http://www.adobe.com/2006/mxml" width="100%" fontSize="12" paddingLeft="7" paddingRight="7">
+	<mx:htmlText>
+<![CDATA[
+<p>This simple application is designed to demonstrate the basics of working with the extended NetConnection and NetStream APIs that make using RTMFP possible. It is not production ready and is not designed to show best coding practices.</p>
+<p>To use the application with Adobe's Stratus service you must:</p>
+<ol>
+<li>Get a Stratus developer key</li>
+<li>Incorporate the key into the source code of the RTMFPTests.mxml file, compile, and run.</li>
+<li>Launch one of the publisher panels.</li>
+<li>Make sure the URI is correct and press Connect.</li>
+<li>After the panel connects, copy the entire nc.nearID value from the field that appears.</li>
+<li>Open a player panel.</li>
+<li>Paste the id into the ns.farID field of the player panel.</li>
+<li>Press the player panel's connect button.</li>
+</ol>			
+<p>Note that the buttons that open the panels are grouped. Use a publisher and player within the same group.</p>
+<p>When you use the ACL panels follow the directions above. When both panels are connected, you must copy the nc.nearID from the ACLPlayer panel and paste it into the ACLPublisher's list before pressing Play.</p>
+]]>
+	</mx:htmlText>
+</mx:Text>

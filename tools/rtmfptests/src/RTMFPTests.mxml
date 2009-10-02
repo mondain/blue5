@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" 
+	xmlns:components="components.*"
+	layout="vertical" 
+	horizontalAlign="left"
+	paddingTop="0"
+	paddingLeft="0"
+	paddingRight="0"
+	backgroundColor="#eeeeee"
+	>
+	
+<mx:ApplicationControlBar width="100%">
+	<mx:Button label="Add Publisher" click="addPublisher()"/>
+	<mx:Button label="Add Kick Publisher" click="addKickPublisher()"/>
+	<mx:Button label="Add Player" click="addPlayer()"/>
+	<mx:VRule height="20" strokeColor="#000000"/>
+	<mx:Button label="Add ACL Publisher" click="addACLPublisher()"/>
+	<mx:Button label="Add ACL Player" click="addACLPlayer()"/>
+	<mx:VRule height="20" strokeColor="#000000"/>
+	<mx:Button label="Add File Publisher" click="addFilePublisher()"/>	
+	<mx:Button label="Add File Player" click="addFilePlayer()"/>	
+	<mx:VRule height="20" strokeColor="#000000"/>
+	<mx:Button label="Hide Introduction" click="showHideIntroduction(event)"/>
+</mx:ApplicationControlBar>
+
+<mx:Script><![CDATA[
+
+	import components.*;
+	import mx.managers.PopUpManager;
+	
+	private const developerKey:String = "myStratusDeveloperKeyGoesHere!";
+	
+	private function addPublisher():void{
+		var publisher:Publisher = new Publisher;
+		publisher.x = 10;
+		publisher.y = 48;
+		publisher.developerKey = developerKey;
+		PopUpManager.addPopUp(publisher,this);
+	}
+
+	private function addPlayer():void{
+		var player:Player = new Player;
+		player.y = 48;
+		player.x = stage.stageWidth - player.width - 40;
+		player.developerKey = developerKey;
+		PopUpManager.addPopUp(player,this);
+	}
+	
+	private function addACLPublisher():void{
+		var publisher:ACLPublisher = new ACLPublisher;
+		publisher.x = 30;
+		publisher.y = 68;
+		publisher.developerKey = developerKey;
+		PopUpManager.addPopUp(publisher,this);
+		
+	}
+
+	private function addACLPlayer():void{
+		var player:ACLPlayer = new ACLPlayer;
+		player.x = stage.stageWidth - player.width - 20;
+		player.y = 68;
+		player.developerKey = developerKey;
+		PopUpManager.addPopUp(player,this);
+	}	
+	
+	private function addKickPublisher():void{
+		var publisher:KickPublisher = new KickPublisher;
+		publisher.x = 60;
+		publisher.y = 68;
+		publisher.developerKey = developerKey;
+		PopUpManager.addPopUp(publisher,this);		
+	}
+	
+	private function addFilePublisher():void{
+		var publisher:FilePublisher = new FilePublisher;
+		publisher.x = 60;
+		publisher.y = 68;
+		publisher.developerKey = developerKey;
+		PopUpManager.addPopUp(publisher,this);		
+	}	
+		
+	private function addFilePlayer():void{
+		var player:FilePlayer = new FilePlayer;
+		player.x = stage.stageWidth - player.width - 20;
+		player.y = 68;
+		player.developerKey = developerKey;
+		PopUpManager.addPopUp(player,this);		
+	}
+	
+	private function showHideIntroduction(event:MouseEvent):void{
+		if (event.target.label == "Hide Introduction"){
+			removeChild(introduction);
+			event.target.label = "Show Introduction";
+		}
+		else {
+			addChild(introduction);
+			event.target.label = "Hide Introduction";	
+		}
+	}
+				
+		
+	]]>
+</mx:Script>
+
+<components:Introduction id="introduction" />
+	
+</mx:Application>
