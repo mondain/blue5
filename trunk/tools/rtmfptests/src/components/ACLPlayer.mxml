@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" 
+	width="400" 
+	showCloseButton="true"
+	close="closeWindow()"
+	title="ACL Player"
+	creationComplete="init()"
+	>
+	<mx:states>
+		<mx:State name="Connected" enterState="enterConnectedState()" exitState="exitConnectedState()">
+			<mx:SetProperty target="{connectButton}" name="label" value="Disconnect"/>
+			<mx:SetEventHandler target="{connectButton}" name="click" handler="disconnect()"/>
+			<mx:SetProperty target="{formitem3}" name="label" value="Publisher ID"/>
+			<mx:AddChild relativeTo="{formitem2}" position="before">
+				<mx:FormItem label="nc.nearID" width="100%" id="formitem0">
+					<mx:TextInput id="myPeerIDInput" width="100%"/>
+				</mx:FormItem>
+			</mx:AddChild>
+			<mx:AddChild relativeTo="{formitem2}" position="before">
+				<mx:FormItem label="" width="100%">
+					<mx:Button id="playButton" label="Play" click="playStream()" width="100%"/>
+				</mx:FormItem>
+			</mx:AddChild>
+		</mx:State>
+	</mx:states>
+	
+<mx:UIComponent id="videoHolder" width="240" height="180"/>
+<mx:TextArea id="messageArea" width="100%" height="120"/>
+
+<mx:Form width="100%" id="form1">
+	<mx:FormItem label="URI" width="100%">
+		<mx:TextInput id="uriInput" text="" width="100%"/>
+	</mx:FormItem>
+	<mx:FormItem label="Stream" width="100%" id="formitem1">
+		<mx:TextInput id="streamNameInput" text="main" width="100%"/>
+	</mx:FormItem>	
+	<mx:FormItem label="ns.farID" width="100%" id="formitem3">
+		<mx:TextInput id="peerIDInput" width="100%"/>
+	</mx:FormItem>
+	<mx:FormItem label="" width="100%" id="formitem2">
+		<mx:Button id="connectButton" label="Connect" click="connect()" width="100%"/>
+	</mx:FormItem>
+</mx:Form>
+
+<mx:Script><![CDATA[
+
+	import flash.net.NetConnection;
+	import flash.net.NetStream;		
+	import mx.utils.StringUtil;
+	import mx.managers.PopUpManager;
+			
+	public var developerKey:String;
+	
+	private var video:Video;
+	private var nc:NetConnection;
+	private var ns:NetStream;
+
+	private function init():void{
+		uriInput.text = "rtmfp://stratus.adobe.com/" + developerKey;
+		
+		video = new Video(240, 180);
+		videoHolder.addChild(video);
+		
+		nc = new NetConnection();
+		nc.addEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		nc.addEventListener(AsyncErrorEvent.ASYNC_ERROR, asyncError);
+		nc.addEventListener(IOErrorEvent.IO_ERROR, ioError);
+		nc.addEventListener(SecurityErrorEvent.SECURITY_ERROR, securityError);
+	}
+	
+	private function connect():void{
+		nc.connect(StringUtil.trim(uriInput.text));
+	}
+	
+	private function disconnect():void{
+		nc.close();
+		currentState = "";
+	}
+	
+	private function enterConnectedState():void{
+		title = "Player connected (" + nc.protocol + ").";
+		
+		var peerID:String = StringUtil.trim(peerIDInput.text);
+		myPeerIDInput.text = nc.nearID;
+		if (peerID.length != 0){
+			ns = new NetStream(nc, peerID);
+		}
+		else {
+			ns = new NetStream(nc);
+		}
+		
+		ns.addEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		video.attachNetStream(ns);
+
+	}
+	
+	private function playStream():void{
+		video.clear();
+		ns.play(StringUtil.trim(streamNameInput.text));
+		writeln("ns: " + ns);
+		writeln("video: " + video);		
+	}
+	
+	private function exitConnectedState():void{
+		ns.close();
+		ns.removeEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		ns = null;
+		title = "ACL Publisher disconnected.";
+	}
+	
+	private function netStatus(event:NetStatusEvent):void{
+		var message:String = "netStatus> event: " + event + "\n";
+		for (var p:String in event.info) message += "info." + p + ": " + event.info[p] + "\n";
+		writeln(message);
+		
+		if (event.info.code == "NetConnection.Connect.Success"){
+			currentState = "Connected";
+		}
+	}
+	
+	private function asyncError(error:AsyncErrorEvent):void{
+		writeln("asyncError> error: " + error);
+	}
+
+	private function ioError(error:IOErrorEvent):void{
+		writeln("ioError> error: " + error);
+	}
+	
+	private function securityError(error:SecurityErrorEvent):void{
+		writeln("securityError> error: " + error);
+	}		
+	
+	private function writeln(msg:String):void{
+		messageArea.text += msg + "\n";
+		messageArea.validateNow();
+		messageArea.verticalScrollPosition = messageArea.maxVerticalScrollPosition;
+	}
+	
+	private function closeWindow():void{
+		currentState = "";
+		nc.close();
+		nc.removeEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		nc.removeEventListener(AsyncErrorEvent.ASYNC_ERROR, asyncError);
+		nc.removeEventListener(IOErrorEvent.IO_ERROR, ioError);
+		nc.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, securityError);
+
+		PopUpManager.removePopUp(this);
+	}	
+		
+	]]>
+</mx:Script>
+	
+</mx:TitleWindow>

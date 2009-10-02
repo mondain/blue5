@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" 
+	width="400" 
+	title="ACL Publisher"
+	showCloseButton="true"
+	close="closeWindow()"
+	creationComplete="init()">
+	<mx:states>
+		<mx:State name="Connected" enterState="enterConnectedState()" exitState="exitConnectedState()">
+			<mx:AddChild relativeTo="{formitem2}" position="before">
+				<mx:FormItem label="nc.nearID" width="100%">
+					<mx:TextInput id="peerIDInput" width="100%"/>
+				</mx:FormItem>
+			</mx:AddChild>
+			<mx:SetProperty target="{connectButton}" name="label" value="Disconnect"/>
+			<mx:SetEventHandler target="{connectButton}" name="click" handler="disconnect()"/>
+		</mx:State>
+	</mx:states>
+	
+<mx:UIComponent id="videoHolder" width="240" height="180"/>
+<mx:TextArea id="messageArea" width="100%" height="120"/>
+<mx:List width="100%" height="100" id="aclList" editable="true" enabled="true" ></mx:List>
+
+<mx:Form width="100%">
+	<mx:FormItem label="URI" width="100%">
+		<mx:TextInput id="uriInput" text="" width="100%"/>
+	</mx:FormItem>
+	<mx:FormItem label="Stream" width="100%" id="formitem1">
+		<mx:TextInput id="streamNameInput" text="main" width="100%"/>
+	</mx:FormItem>	
+	<mx:FormItem label="" width="100%" id="formitem2">
+		<mx:Button id="connectButton" label="Connect" click="connect()" width="100%"/>
+	</mx:FormItem>
+</mx:Form>
+
+<mx:Script><![CDATA[
+	import mx.collections.ArrayCollection;
+			
+	import flash.net.NetConnection;
+	import flash.net.NetStream;		
+	import mx.utils.StringUtil;
+	import mx.managers.PopUpManager;
+	
+	public var developerKey:String;
+			
+	private var video:Video;
+	private var nc:NetConnection;
+	private var ns:NetStream;
+	private var camera:Camera;
+	private var microphone:Microphone;
+	private var streamClient:Object;
+	
+	private function onPeerConnect(subscriber:NetStream):Boolean{
+		writeln("onPeerConnect> subscriber: " + subscriber.farID);
+		/* Array search version: 
+		var acl:Array = ArrayCollection(aclList.dataProvider).source;
+		for (var i:int = 0; i < acl.length; i++){
+			if (acl[i] == subscriber.farID) return true;
+		}
+		return false;
+		*/
+		// Let's pretend things are in an object:
+		var aclObject:Object = [];
+		var acl:Array = ArrayCollection(aclList.dataProvider).source;
+		for (var i:int = 0; i < acl.length; i++){
+			aclObject[acl[i]] = true;
+		}
+		
+		return aclObject[ subscriber.farID ];
+		
+	}
+	
+	private function init():void{
+		uriInput.text = "rtmfp://stratus.adobe.com/" + developerKey;
+		// Setup the List component:
+		aclList.dataProvider = new ArrayCollection(["Enter PeerIDs that are allowed to receive this stream here.", "-", "-", "-"]);
+		// Setup the netStream.client.onPeerConnect method:
+		var aclPublisher:ACLPublisher = this;
+		streamClient = {
+			onPeerConnect: function(subscriber:NetStream):Boolean{return aclPublisher.onPeerConnect(subscriber)}
+		}
+		
+		video = new Video(240, 180);
+		videoHolder.addChild(video);
+		nc = new NetConnection();
+		nc.addEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		nc.addEventListener(AsyncErrorEvent.ASYNC_ERROR, asyncError);
+		nc.addEventListener(IOErrorEvent.IO_ERROR, ioError);
+		nc.addEventListener(SecurityErrorEvent.SECURITY_ERROR, securityError);
+
+	}
+	
+	private function connect():void{
+		nc.connect(StringUtil.trim(uriInput.text));
+	}
+	
+	private function disconnect():void{
+		nc.close();
+		currentState = "";
+	}
+	
+	private function enterConnectedState():void{
+		title = "ACL Publisher connected (" + nc.protocol + ").";
+		
+		if(nc.protocol == "rtmfp"){
+			ns = new NetStream(nc, NetStream.DIRECT_CONNECTIONS);
+			ns.client = streamClient;
+			peerIDInput.text = nc.nearID;
+		}
+		else {
+			ns = new NetStream(nc);
+			peerIDInput.text = "Not applicable.";
+		}
+		
+		ns.addEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		
+		camera = Camera.getCamera();
+		if (camera){
+			camera.setMode(240, 180, 15);
+			ns.attachCamera(camera);
+			video.attachCamera(camera);
+		}
+		microphone = Microphone.getMicrophone();
+		if (microphone){
+			microphone.codec = SoundCodec.SPEEX;
+			ns.attachAudio(microphone);
+		}
+		
+		ns.publish(StringUtil.trim(streamNameInput.text));
+	}
+	
+	private function exitConnectedState():void{
+		ns.close();
+		ns.removeEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		ns = null;
+		title = "Publisher disconnected.";
+	}
+	
+	private function netStatus(event:NetStatusEvent):void{
+		var message:String = "netStatus> event: " + event + "\n";
+		for (var p:String in event.info) message += "info." + p + ": " + event.info[p] + "\n";
+		writeln(message);
+		
+		if (event.info.code == "NetConnection.Connect.Success"){
+			var props:Array = ["farID", "nearID", "farNonce", "nearNonce", "protocol"];
+			for (var i:int = 0; i < props.length; ++i){
+				var prop:String = props[i];
+				writeln("nc." + prop + ": " + nc[prop]);
+			}
+			currentState = "Connected";
+		}
+	}
+	
+	private function asyncError(error:AsyncErrorEvent):void{
+		writeln("asyncError> error: " + error);
+	}
+
+	private function ioError(error:IOErrorEvent):void{
+		writeln("ioError> error: " + error);
+	}
+	
+	private function securityError(error:SecurityErrorEvent):void{
+		writeln("securityError> error: " + error);
+	}		
+	
+	private function writeln(msg:String):void{
+		messageArea.text += msg + "\n";
+		messageArea.validateNow();
+		messageArea.verticalScrollPosition = messageArea.maxVerticalScrollPosition;
+	}
+	
+	private function closeWindow():void{
+		currentState = "";
+		nc.close();
+		nc.removeEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		nc.removeEventListener(AsyncErrorEvent.ASYNC_ERROR, asyncError);
+		nc.removeEventListener(IOErrorEvent.IO_ERROR, ioError);
+		nc.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, securityError);
+
+		PopUpManager.removePopUp(this);
+	}
+			
+	]]>
+</mx:Script>
+	
+</mx:TitleWindow>

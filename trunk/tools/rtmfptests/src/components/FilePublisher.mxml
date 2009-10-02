@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" 
+	width="400" 
+	title="File Publisher"
+	showCloseButton="true"
+	close="closeWindow()"
+	creationComplete="init()">
+	<mx:states>
+		<mx:State name="Connected" enterState="enterConnectedState()" exitState="exitConnectedState()">
+			<mx:AddChild relativeTo="{formitem2}" position="before">
+				<mx:FormItem label="nc.nearID" width="100%">
+					<mx:TextInput id="peerIDInput" width="100%"/>
+				</mx:FormItem>
+			</mx:AddChild>
+			<mx:SetProperty target="{connectButton}" name="label" value="Disconnect"/>
+			<mx:SetEventHandler target="{connectButton}" name="click" handler="disconnect()"/>
+			<mx:AddChild relativeTo="{formitem2}" position="before">
+				<mx:FormItem width="100%">
+					<mx:Button label="Send File" width="100%" click="sendFile()"/>
+				</mx:FormItem>
+			</mx:AddChild>
+		</mx:State>
+	</mx:states>
+	
+<mx:TextArea id="messageArea" width="100%" height="220"/>
+
+<mx:Form width="100%">
+	<mx:FormItem label="URI" width="100%">
+		<mx:TextInput id="uriInput" text="" width="100%"/>
+	</mx:FormItem>
+	<mx:FormItem label="Stream" width="100%" id="formitem1">
+		<mx:TextInput id="streamNameInput" text="main" width="100%"/>
+	</mx:FormItem>	
+	<mx:FormItem label="" width="100%" id="formitem2">
+		<mx:Button id="connectButton" label="Connect" click="connect()" width="100%"/>
+	</mx:FormItem>
+</mx:Form>
+
+<mx:Script><![CDATA[
+			
+	import flash.net.NetConnection;
+	import flash.net.NetStream;		
+	import flash.net.FileReference;
+	import mx.utils.StringUtil;
+	import mx.managers.PopUpManager;
+
+	public var developerKey:String;
+		
+	private var nc:NetConnection;
+	private var ns:NetStream;
+	private var file:FileReference;
+	
+	private function init():void{
+		uriInput.text = "rtmfp://stratus.adobe.com/" + developerKey;
+		nc = new NetConnection();
+		nc.addEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		nc.addEventListener(AsyncErrorEvent.ASYNC_ERROR, asyncError);
+		nc.addEventListener(IOErrorEvent.IO_ERROR, ioError);
+		nc.addEventListener(SecurityErrorEvent.SECURITY_ERROR, securityError);
+	}
+	
+	private function sendFile():void{
+		file = new FileReference();
+		file.addEventListener(Event.SELECT, handleFileSelection);
+		file.browse();
+	}
+	
+	private function handleFileSelection(event:Event):void{
+		writeln("handleFileSelection> event: " + event);
+		file.removeEventListener(Event.SELECT, handleFileSelection);
+		file.addEventListener(Event.COMPLETE, handleFileLoad);
+		file.load();
+	}
+	
+	private function handleFileLoad(event:Event):void{
+		writeln("handleFileLoad> event: " + event + ", " + ns);
+		ns.send("receiveFile", file.name, file.data as ByteArray);
+		file.removeEventListener(Event.COMPLETE, handleFileLoad);
+	}
+
+	
+	private function connect():void{
+		nc.connect(StringUtil.trim(uriInput.text));
+	}
+	
+	private function disconnect():void{
+		nc.close();
+		currentState = "";
+	}
+	
+	private function enterConnectedState():void{
+		title = "File Publisher connected (" + nc.protocol + ").";
+		peerIDInput.text = nc.nearID;
+		
+		if(nc.protocol == "rtmfp"){
+			ns = new NetStream(nc, NetStream.DIRECT_CONNECTIONS);
+		}
+		else {
+			ns = new NetStream(nc);
+		}
+		
+		ns.addEventListener(NetStatusEvent.NET_STATUS, netStatus);
+				
+		ns.publish(StringUtil.trim(streamNameInput.text));
+	}
+	
+	private function exitConnectedState():void{
+		ns.close();
+		ns.removeEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		ns = null;
+		title = "File Publisher disconnected.";
+	}
+	
+	private function netStatus(event:NetStatusEvent):void{
+		var message:String = "netStatus> event: " + event + "\n";
+		for (var p:String in event.info) message += "info." + p + ": " + event.info[p] + "\n";
+		writeln(message);
+		
+		if (event.info.code == "NetConnection.Connect.Success"){
+			var props:Array = ["farID", "nearID", "farNonce", "nearNonce", "protocol"];
+			for (var i:int = 0; i < props.length; ++i){
+				var prop:String = props[i];
+				writeln("nc." + prop + ": " + nc[prop]);
+			}
+			currentState = "Connected";
+		}
+		
+	}
+	
+	private function asyncError(error:AsyncErrorEvent):void{
+		writeln("asyncError> error: " + error);
+	}
+
+	private function ioError(error:IOErrorEvent):void{
+		writeln("ioError> error: " + error);
+	}
+	
+	private function securityError(error:SecurityErrorEvent):void{
+		writeln("securityError> error: " + error);
+	}		
+	
+	private function writeln(msg:String):void{
+		messageArea.text += msg + "\n";
+		messageArea.validateNow();
+		messageArea.verticalScrollPosition = messageArea.maxVerticalScrollPosition;
+	}
+	
+	private function closeWindow():void{
+		currentState = "";
+		nc.close();
+		nc.removeEventListener(NetStatusEvent.NET_STATUS, netStatus);
+		nc.removeEventListener(AsyncErrorEvent.ASYNC_ERROR, asyncError);
+		nc.removeEventListener(IOErrorEvent.IO_ERROR, ioError);
+		nc.removeEventListener(SecurityErrorEvent.SECURITY_ERROR, securityError);
+
+		PopUpManager.removePopUp(this);
+	}
+			
+	]]>
+</mx:Script>
+	
+</mx:TitleWindow>
