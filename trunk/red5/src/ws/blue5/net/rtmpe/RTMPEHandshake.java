@@ -39,6 +39,7 @@ import javax.crypto.spec.SecretKeySpec;
 import org.apache.mina.core.buffer.IoBuffer;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.red5.server.net.IHandshake;
+import org.red5.server.net.rtmp.message.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,16 +53,17 @@ import ws.blue5.util.Utils;
  * This class originated from the flazr project by Peter Thomas.
  * <br />
  * 
+ * @see crtmpserver <a href="http://www.rtmpd.com/browser/trunk/sources/thelib/src/protocols/rtmp/basertmpprotocol.cpp">rtmp protocol code</a>
+ * @see crtmpserver <a href="http://www.rtmpd.com/browser/trunk/sources/thelib/src/protocols/rtmp/inboundrtmpprotocol.cpp">inbound rtmp code</a>
+ * 
  * @author Peter Thomas (ptrthomas@gmail.com)
  * @author Paul Gregoire (mondain@gmail.com)
  */
-public class RTMPEHandshake implements IHandshake {
+public class RTMPEHandshake extends RTMPHandshake {
 
 	private static final Logger logger = LoggerFactory.getLogger(RTMPEHandshake.class);
 
-	protected static final int HANDSHAKE_SIZE = 1536;
-
-	private static final int HANDSHAKE_SIZE_SERVER = 1 + HANDSHAKE_SIZE + HANDSHAKE_SIZE;
+	private static final int HANDSHAKE_SIZE_SERVER = 1 + (Constants.HANDSHAKE_SIZE * 2);
 
 	protected static final int SHA256_DIGEST_LENGTH = 32;
 
@@ -80,29 +82,6 @@ public class RTMPEHandshake implements IHandshake {
 	private static final byte[] SERVER_CONST_CRUD = concat(SERVER_CONST, RANDOM_CRUD);
 
 	private static final byte[] CLIENT_CONST_CRUD = concat(CLIENT_CONST, RANDOM_CRUD);
-
-    private static final byte[] DH_MODULUS_BYTES = {
-		(byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff,
-		(byte)0xc9, (byte)0x0f, (byte)0xda, (byte)0xa2, (byte)0x21, (byte)0x68, (byte)0xc2, (byte)0x34,
-		(byte)0xc4, (byte)0xc6, (byte)0x62, (byte)0x8b, (byte)0x80, (byte)0xdc, (byte)0x1c, (byte)0xd1,
-		(byte)0x29, (byte)0x02, (byte)0x4e, (byte)0x08, (byte)0x8a, (byte)0x67, (byte)0xcc, (byte)0x74,
-		(byte)0x02, (byte)0x0b, (byte)0xbe, (byte)0xa6, (byte)0x3b, (byte)0x13, (byte)0x9b, (byte)0x22,
-		(byte)0x51, (byte)0x4a, (byte)0x08, (byte)0x79, (byte)0x8e, (byte)0x34, (byte)0x04, (byte)0xdd,
-		(byte)0xef, (byte)0x95, (byte)0x19, (byte)0xb3, (byte)0xcd, (byte)0x3a, (byte)0x43, (byte)0x1b,
-		(byte)0x30, (byte)0x2b, (byte)0x0a, (byte)0x6d, (byte)0xf2, (byte)0x5f, (byte)0x14, (byte)0x37,
-		(byte)0x4f, (byte)0xe1, (byte)0x35, (byte)0x6d, (byte)0x6d, (byte)0x51, (byte)0xc2, (byte)0x45,
-		(byte)0xe4, (byte)0x85, (byte)0xb5, (byte)0x76, (byte)0x62, (byte)0x5e, (byte)0x7e, (byte)0xc6,
-		(byte)0xf4, (byte)0x4c, (byte)0x42, (byte)0xe9, (byte)0xa6, (byte)0x37, (byte)0xed, (byte)0x6b,
-		(byte)0x0b, (byte)0xff, (byte)0x5c, (byte)0xb6, (byte)0xf4, (byte)0x06, (byte)0xb7, (byte)0xed,
-		(byte)0xee, (byte)0x38, (byte)0x6b, (byte)0xfb, (byte)0x5a, (byte)0x89, (byte)0x9f, (byte)0xa5,
-		(byte)0xae, (byte)0x9f, (byte)0x24, (byte)0x11, (byte)0x7c, (byte)0x4b, (byte)0x1f, (byte)0xe6,
-		(byte)0x49, (byte)0x28, (byte)0x66, (byte)0x51, (byte)0xec, (byte)0xe6, (byte)0x53, (byte)0x81,
-		(byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff
-    };
-
-    protected static final BigInteger DH_MODULUS = new BigInteger(1, DH_MODULUS_BYTES);
-
-    protected static final BigInteger DH_BASE = BigInteger.valueOf(2);    
 
 	private IoBuffer data;
     
@@ -152,52 +131,18 @@ public class RTMPEHandshake implements IHandshake {
 		return bytes;
 	}
 
-	private static KeyPair generateKeyPair(RtmpSession session) {
-		DHParameterSpec keySpec = new DHParameterSpec(DH_MODULUS, DH_BASE);
-		try {
-			KeyPairGenerator keyGen = KeyPairGenerator.getInstance("DH");
-			keyGen.initialize(keySpec);
-			KeyPair keyPair = keyGen.generateKeyPair();
-		    KeyAgreement keyAgreement = KeyAgreement.getInstance("DH");
-		    keyAgreement.init(keyPair.getPrivate());
-		    session.setKeyAgreement(keyAgreement);
-			return keyPair;
-		} catch(Exception e) {
-			throw new RuntimeException(e);
-		}
-	}
-
-	protected static byte[] getPublicKey(KeyPair keyPair) {
-		 DHPublicKey publicKey = (DHPublicKey) keyPair.getPublic();
-	     BigInteger	dh_Y = publicKey.getY();
-	     logger.debug("public key value: " + dh_Y);
-	     byte[] result = dh_Y.toByteArray();
-	     logger.debug("public key as bytes, len = [" + result.length + "]: " + Utils.toHex(result));
-	     byte[] temp = new byte[128];
-	     if(result.length < 128) {
-	    	 System.arraycopy(result, 0, temp, 128 - result.length, result.length);
-	    	 result = temp;
-	    	 logger.debug("padded public key length to 128");
-	     } else if(result.length > 128){
-	    	 System.arraycopy(result, result.length - 128, temp, 0, 128);
-	    	 result = temp;
-	    	 logger.debug("truncated public key length to 128");
-	     }
-	     return result;
-	}
-
 	private static byte[] getSharedSecret(byte[] otherPublicKeyBytes, KeyAgreement keyAgreement) {
 		BigInteger otherPublicKeyInt = new BigInteger(1, otherPublicKeyBytes);
 		try {
 			KeyFactory keyFactory = KeyFactory.getInstance("DH");
-			KeySpec otherPublicKeySpec = new DHPublicKeySpec(otherPublicKeyInt, DH_MODULUS, DH_BASE);
+			KeySpec otherPublicKeySpec = new DHPublicKeySpec(otherPublicKeyInt, RTMPHandshake.DH_MODULUS, RTMPHandshake.DH_BASE);
 			PublicKey otherPublicKey = keyFactory.generatePublic(otherPublicKeySpec);
 		    keyAgreement.doPhase(otherPublicKey, true);
 		} catch(Exception e) {
 			throw new RuntimeException(e);
 		}
 	    byte[] sharedSecret = keyAgreement.generateSecret();
-	    logger.debug("shared secret (" + sharedSecret.length + " bytes): " + Utils.toHex(sharedSecret));
+	    logger.debug("Shared secret [{}]: ", sharedSecret.length, Utils.toHex(sharedSecret));
 	    return sharedSecret;
 	}						
 
@@ -206,10 +151,10 @@ public class RTMPEHandshake implements IHandshake {
 	}
 
 	public static RTMPEHandshake generateClientRequest1(RtmpSession session) {
-		IoBuffer buf = IoBuffer.allocate(HANDSHAKE_SIZE);
+		IoBuffer buf = IoBuffer.allocate(Constants.HANDSHAKE_SIZE);
         Utils.writeInt32Reverse(buf, (int) System.currentTimeMillis() & 0x7FFFFFFF);
         buf.put(new byte[] { 0x09, 0x00, 0x7c, 0x02 }); // flash player version 9.0.124.2
-		byte[] randomBytes = new byte[HANDSHAKE_SIZE - 8]; // 4 + 4 bytes [time, version] done already
+		byte[] randomBytes = new byte[Constants.HANDSHAKE_SIZE - 8]; // 4 + 4 bytes [time, version] done already
 		Random random = new Random();
 		random.nextBytes(randomBytes);
 		buf.put(randomBytes);
@@ -228,12 +173,12 @@ public class RTMPEHandshake implements IHandshake {
 	        byte[] digestPointer = getFourBytesFrom(buf, 8);
 	        int digestOffset = calculateOffset(digestPointer, 728, 12);
 	        buf.rewind();
-	        int messageLength = HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH;
+	        int messageLength = Constants.HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH;
 	        byte[] message = new byte[messageLength];
 	        buf.get(message, 0, digestOffset);
 	        int afterDigestOffset = digestOffset + SHA256_DIGEST_LENGTH;
 	        buf.position(afterDigestOffset);
-	        buf.get(message, digestOffset, HANDSHAKE_SIZE - afterDigestOffset);
+	        buf.get(message, digestOffset, Constants.HANDSHAKE_SIZE - afterDigestOffset);
 			byte[] digest = Utils.calculateHMACSHA256(message, CLIENT_CONST);
 			buf.position(digestOffset);
 			buf.put(digest);
@@ -242,7 +187,7 @@ public class RTMPEHandshake implements IHandshake {
         }
 
         RTMPEHandshake hs = new RTMPEHandshake();
-        hs.data = IoBuffer.allocate(HANDSHAKE_SIZE + 1);
+        hs.data = IoBuffer.allocate(Constants.HANDSHAKE_SIZE + 1);
 		if(session.isEncrypted()) {
 			hs.data.put((byte) 0x06);
 		} else {
@@ -263,8 +208,8 @@ public class RTMPEHandshake implements IHandshake {
 		
 		// TODO validate bytes[0] is 0x03 or 0x06 (encryption)
 		
-		IoBuffer buf = IoBuffer.allocate(HANDSHAKE_SIZE);
-		buf.put(bytes, 1, HANDSHAKE_SIZE);
+		IoBuffer buf = IoBuffer.allocate(Constants.HANDSHAKE_SIZE);
+		buf.put(bytes, 1, Constants.HANDSHAKE_SIZE);
 		buf.flip();		
 		logger.debug("server response part 1: " + buf);		
 
@@ -273,23 +218,23 @@ public class RTMPEHandshake implements IHandshake {
 			// TODO validate time and version ?
 			byte[] serverTime = new byte[4];
 			buf.get(serverTime);
-			logger.debug("server time: " + Utils.toHex(serverTime));
+			logger.debug("server time: {}", Utils.toHex(serverTime));
 
 			byte[] serverVersion = new byte[4];
 			buf.get(serverVersion);
-			logger.debug("server version: " + Utils.toHex(serverVersion));
+			logger.debug("server version: {}", Utils.toHex(serverVersion));
 
 			byte[] digestPointer = new byte[4]; // position 8
 			buf.get(digestPointer);
 			int digestOffset = calculateOffset(digestPointer, 728, 12);
 	        buf.rewind();
 
-	        int messageLength = HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH;
+	        int messageLength = Constants.HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH;
 	        byte[] message = new byte[messageLength];
 			buf.get(message, 0, digestOffset);
 			int afterDigestOffset = digestOffset + SHA256_DIGEST_LENGTH;
 			buf.position(afterDigestOffset);
-			buf.get(message, digestOffset, HANDSHAKE_SIZE - afterDigestOffset);
+			buf.get(message, digestOffset, Constants.HANDSHAKE_SIZE - afterDigestOffset);
 			byte[] digest = Utils.calculateHMACSHA256(message, SERVER_CONST);
 			byte[] serverDigest = new byte[SHA256_DIGEST_LENGTH];
 			buf.position(digestOffset);
@@ -298,7 +243,7 @@ public class RTMPEHandshake implements IHandshake {
 			byte[] serverPublicKey = new byte[128];
 			if(Arrays.equals(digest, serverDigest)) {
 				logger.info("type 1 digest comparison success");
-				byte[] dhPointer = getFourBytesFrom(buf, HANDSHAKE_SIZE - 4);
+				byte[] dhPointer = getFourBytesFrom(buf, Constants.HANDSHAKE_SIZE - 4);
 				int dhOffset = calculateOffset(dhPointer, 632, 772);
 				buf.position(dhOffset);
 				buf.get(serverPublicKey);
@@ -312,7 +257,7 @@ public class RTMPEHandshake implements IHandshake {
 				buf.get(message, 0, digestOffset);
 				afterDigestOffset = digestOffset + SHA256_DIGEST_LENGTH;
 				buf.position(afterDigestOffset);
-				buf.get(message, digestOffset, HANDSHAKE_SIZE - afterDigestOffset);
+				buf.get(message, digestOffset, Constants.HANDSHAKE_SIZE - afterDigestOffset);
 				digest = Utils.calculateHMACSHA256(message, SERVER_CONST);
 				serverDigest = new byte[SHA256_DIGEST_LENGTH];
 				buf.position(digestOffset);
@@ -352,8 +297,8 @@ public class RTMPEHandshake implements IHandshake {
 			}
 		}
 		
-		IoBuffer partTwo = IoBuffer.allocate(HANDSHAKE_SIZE);
-		partTwo.put(bytes, 1 + HANDSHAKE_SIZE, HANDSHAKE_SIZE);
+		IoBuffer partTwo = IoBuffer.allocate(Constants.HANDSHAKE_SIZE);
+		partTwo.put(bytes, 1 + Constants.HANDSHAKE_SIZE, Constants.HANDSHAKE_SIZE);
 		partTwo.flip();	
 		
 		logger.debug("server response part 2: " + partTwo);
@@ -364,7 +309,7 @@ public class RTMPEHandshake implements IHandshake {
 			if(Arrays.equals(new byte[]{0, 0, 0, 0}, firstFourBytes)) {
 				logger.warn("server response part 2 first four bytes are zero, did handshake fail ?");
 			}			
-			byte[] message = new byte[HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH];
+			byte[] message = new byte[Constants.HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH];
 			partTwo.get(message);
 			byte[] digest = Utils.calculateHMACSHA256(session.getClientDigest(), SERVER_CONST_CRUD);
 			byte[] signature = Utils.calculateHMACSHA256(message, digest);
@@ -382,7 +327,7 @@ public class RTMPEHandshake implements IHandshake {
 		// swf verification
 		if(session.getSwfHash() != null) {
 			byte[] bytesFromServer = new byte[SHA256_DIGEST_LENGTH];
-			buf.position(HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH);
+			buf.position(Constants.HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH);
 			buf.get(bytesFromServer);
 			byte[] bytesFromServerHash = Utils.calculateHMACSHA256(session.getSwfHash().getBytes(), bytesFromServer);
 			// construct SWF verification pong payload
@@ -408,12 +353,12 @@ public class RTMPEHandshake implements IHandshake {
 		// TODO validate serverResponsePart2
 		if(session.isEncrypted()) { // encryption
 			logger.info("creating client handshake part 2 for encryption");
-			byte[] randomBytes = new byte[HANDSHAKE_SIZE];
+			byte[] randomBytes = new byte[Constants.HANDSHAKE_SIZE];
 			Random random = new Random();
 			random.nextBytes(randomBytes);
 			IoBuffer buf = IoBuffer.wrap(randomBytes);
 			byte[] digest = Utils.calculateHMACSHA256(session.getServerDigest(), CLIENT_CONST_CRUD);
-			byte[] message = new byte[HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH];
+			byte[] message = new byte[Constants.HANDSHAKE_SIZE - SHA256_DIGEST_LENGTH];
 			buf.rewind();
 			buf.get(message);
 			byte[] signature = Utils.calculateHMACSHA256(message, digest);
@@ -426,7 +371,7 @@ public class RTMPEHandshake implements IHandshake {
 			// which is known to increase the secure-ness of RC4
 			// RC4 state is just a function of number of bytes processed so far
 			// that's why we just run 1536 arbitrary bytes through the keys below
-			byte[] dummyBytes = new byte[HANDSHAKE_SIZE];
+			byte[] dummyBytes = new byte[Constants.HANDSHAKE_SIZE];
 			session.getCipherIn().update(dummyBytes);
 			session.getCipherOut().update(dummyBytes);
 
@@ -435,7 +380,7 @@ public class RTMPEHandshake implements IHandshake {
 			return hs;
 		} else {
 			data.get(); // skip first byte
-			byte[] bytes = new byte[HANDSHAKE_SIZE];
+			byte[] bytes = new byte[Constants.HANDSHAKE_SIZE];
 			data.get(bytes); // copy first half of server response
 			RTMPEHandshake hs = new RTMPEHandshake();
 			hs.data = IoBuffer.wrap(bytes);
