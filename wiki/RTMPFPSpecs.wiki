@@ -2,8 +2,6 @@
 
 = 1. Encryption scheme used in RTMFP =
 
-Thanks to  Gavriloaie Eugen-Andrei efforts [http://rtmpd.com/wiki/rtmfp]
-
 == 1.1. Goal ==
 
 '''From this plain request'''
@@ -171,4 +169,5 @@ C0 89 30 EF FE 7A BB 35 1D 39 58 67 E6 B5 B9 63
  * '''0x02''' - a length
  * '''next 0x02 bytes''' - the payload (unknown for now)
 = 3. Authors =
-== 3.1. [mailto:crtmpserver@gmail.com Gavriloaie Eugen-Andrei] (http://www.rtmpd.com) ==
+
+(removed the author since he seems to have some issues with Adobe)
